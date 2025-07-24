@@ -57,7 +57,7 @@
 
 3. 在`cfg`中指定的每个非零奖励值都会添加一个相应的函数，这些函数的返回值会被求和得到总奖励
 
-4. 任务需要通过`task_registry.register(name, EnvClass, EnvConfig, TrainConfig)`进行注册，这一步在`envs/__init__.py`中完成
+4. 任务需要通过`task_registry.register(name, EnvClass, EnvConfig, TrainConfig)`进行注册，这一步在`legged_gym/envs/__init__.py`中完成
 
 ## 使用方法
 
