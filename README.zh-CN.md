@@ -30,15 +30,11 @@
 4. 安装本项目：
    - 安装本项目库：
    ```bash
-   cd legged_gym-hhfc && pip install -e .
+   pip install -e .
    ```
    - 安装RL库：
    ```bash
    cd rsl_rl && pip install -e .
-   ```
-   - 安装主项目：
-   ```bash
-   cd .. && pip install -e .
    ```
    - 安装额外依赖：
    ```bash
@@ -63,7 +59,7 @@
 
 1. **训练模型**：
    ```bash
-   cd legged_gym-hhfc/legged_gym/scripts && python train.py
+   cd legged_gym/scripts && python train.py
    ```
    - 在CPU上运行：添加参数 `--sim_device=cpu --rl_device=cpu`
    - 无渲染运行：添加参数 `--headless`
