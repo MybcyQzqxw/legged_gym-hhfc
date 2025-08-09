@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-脚本用于处理轨迹文件：将第11列和第17列取负值
+脚本用于处理轨迹文件, 以对齐仿真
 """
 
 import numpy as np
@@ -61,7 +61,7 @@ def process_trajectory_file(input_file, output_file):
     print(f"处理完成，保存到: {output_file}")
 
 if __name__ == "__main__":
-    input_file = "/home/harmony/legged_gym-hhfc/resources/trajectory/humanoid/run_50Hz_4p0_ori.dat"
-    output_file = "/home/harmony/legged_gym-hhfc/resources/trajectory/humanoid/run_50Hz_4p0.dat"
-    
+    input_file = "/home/harmony/legged_gym-hhfc/resources/trajectory/humanoid/run_100Hz_4p0_ori.dat"
+    output_file = "/home/harmony/legged_gym-hhfc/resources/trajectory/humanoid/run_100Hz_4p0.dat"
+
     process_trajectory_file(input_file, output_file)
