@@ -14,6 +14,32 @@ from scipy.stats import vonmises
 from collections import deque
 
 
+def quat_to_euler_xyz(quat: torch.Tensor):
+    """Convert quaternion (x,y,z,w) to Euler angles (roll, pitch, yaw).
+    Args:
+        quat: (...,4) tensor
+    Returns:
+        roll, pitch, yaw tensors of shape (...,)
+    """
+    x = quat[..., 0]
+    y = quat[..., 1]
+    z = quat[..., 2]
+    w = quat[..., 3]
+    # roll (x-axis rotation)
+    t0 = 2.0 * (w * x + y * z)
+    t1 = 1.0 - 2.0 * (x * x + y * y)
+    roll = torch.atan2(t0, t1)
+    # pitch (y-axis)
+    t2 = 2.0 * (w * y - z * x)
+    t2_clamped = torch.clamp(t2, -0.999999, 0.999999)
+    pitch = torch.asin(t2_clamped)
+    # yaw (z-axis)
+    t3 = 2.0 * (w * z + x * y)
+    t4 = 1.0 - 2.0 * (y * y + z * z)
+    yaw = torch.atan2(t3, t4)
+    return roll, pitch, yaw
+
+
 class HumanoidRobot(LeggedRobot):
 
     def test_ref_data(self):
@@ -119,23 +145,23 @@ class HumanoidRobot(LeggedRobot):
         if self.cfg.domain_rand.randomize_ctrl_delay:
             ctrl_delay = (self.action_delay /
                           self.cfg.domain_rand.ctrl_delay_step_range[1]).view(-1, 1)  # normalize ctrl delay to [0, 1]
+        # privileged obs add base height (z) -> expected 81 dims per config
         self.privileged_obs_buf = torch.cat((
             self.base_lin_vel * self.obs_scales.lin_vel,  # 3
             self.base_ang_vel * self.obs_scales.ang_vel,  # 3
             self.projected_gravity,                       # 3
             self.commands[:, :3] * self.commands_scale,   # 3
-            (self.dof_pos - self.default_dof_pos) *
-            self.obs_scales.dof_pos,  # 12
+            (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,  # 12
             self.dof_vel * self.obs_scales.dof_vel,       # 12
             self.actions,                                 # 12
             self.rand_push_force[:, :2],                  # 2
             self.env_frictions,                           # 1
             self.base_mass / 30.0,                        # 1
             self.com_displacements,                       # 3
-            # ctrl_delay,                                   # 1
             self._kp_scale,                               # 12
             self._kd_scale,                               # 12
             self.joint_armature.unsqueeze(1),             # 1
+            self.root_states[:, 2].unsqueeze(1),          # 1 base height
         ), dim=-1)
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
@@ -163,12 +189,13 @@ class HumanoidRobot(LeggedRobot):
     def compute_policy_state(self):
         """ Computes policy_state for discriminator
         """
-        self.state_buf = torch.cat((
-                                    # self.base_quat,  # 4
-                                #    self.base_ang_vel, # 3
-                                   self.dof_pos,
-                                   self.dof_vel,
-                                    ), dim=-1)
+    # 30-dim: base_euler(3) + base_ang_vel(3) + dof_pos(12) + dof_vel(12)
+    roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
+    base_euler = torch.stack((roll, pitch, yaw), dim=-1)
+    self.state_buf = torch.cat((base_euler,
+                    self.base_ang_vel,
+                    self.dof_pos,
+                    self.dof_vel), dim=-1)
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -269,12 +296,19 @@ class HumanoidRobot(LeggedRobot):
         # base velocities
         self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(
             env_ids), 6), device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
-        # base orientation
-        base_orien_scale = self.cfg.init_state.init_base_angle_max
-        self.root_states[env_ids, 3:7] = quat_from_euler_xyz(torch_rand_float(-base_orien_scale, base_orien_scale, (len(env_ids), 1), device=self.device).view(-1),
-                                                             torch_rand_float(-base_orien_scale, base_orien_scale, (len(
-                                                                 env_ids), 1), device=self.device).view(-1),
-                                                             torch_rand_float(-base_orien_scale, base_orien_scale, (len(env_ids), 1), device=self.device).view(-1))
+        # base orientation: lying start if standup imitation enabled
+        if getattr(self.cfg.env, 'standup_imitation', False):
+            # Lie on back: pitch ~ -pi/2 (depending axis convention). Add small noise.
+            pitch = -1.57 + torch_rand_float(-0.05, 0.05, (len(env_ids), 1), device=self.device).view(-1)
+            roll = torch_rand_float(-0.05, 0.05, (len(env_ids), 1), device=self.device).view(-1)
+            yaw = torch_rand_float(-3.14, 3.14, (len(env_ids), 1), device=self.device).view(-1)
+            self.root_states[env_ids, 3:7] = quat_from_euler_xyz(roll, pitch, yaw)
+        else:
+            base_orien_scale = self.cfg.init_state.init_base_angle_max
+            self.root_states[env_ids, 3:7] = quat_from_euler_xyz(
+                torch_rand_float(-base_orien_scale, base_orien_scale, (len(env_ids), 1), device=self.device).view(-1),
+                torch_rand_float(-base_orien_scale, base_orien_scale, (len(env_ids), 1), device=self.device).view(-1),
+                torch_rand_float(-base_orien_scale, base_orien_scale, (len(env_ids), 1), device=self.device).view(-1))
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(
@@ -455,11 +489,8 @@ class HumanoidRobot(LeggedRobot):
         noise_vec[39:42] = noise_scales.ang_vel * \
             noise_level * self.obs_scales.ang_vel
         noise_vec[42:45] = noise_scales.gravity * noise_level
-        noise_vec[45:47] = 0.  # clock inputs
-        noise_vec[47:49] = 0.  # phase ratio
-        if self.cfg.terrain.measure_heights:
-            noise_vec[49:239] = noise_scales.height_measurements * \
-                noise_level * self.obs_scales.height_measurements
+    # removed clock & phase inputs; total length = 45
+    # heights not used (measure_heights False in current config). If enabled, must extend num_single_obs accordingly.
         return noise_vec
 
     def _init_buffers(self):
@@ -578,3 +609,37 @@ class HumanoidRobot(LeggedRobot):
         out_of_limits += (self.dof_pos[:, dof_indices_excluding_knee] -
                           self.dof_pos_limits[dof_indices_excluding_knee, 1]).clip(min=0.)
         return torch.sum(out_of_limits, dim=1)
+
+    # ---------------- Imitation Rewards -----------------
+    def _build_current_state_30(self):
+        roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
+        base_euler = torch.stack((roll, pitch, yaw), dim=-1)
+        return torch.cat((base_euler, self.base_ang_vel, self.dof_pos, self.dof_vel), dim=-1)
+
+    def _get_ref_state(self):
+        # lazy build reference tensor (expects 30 columns: euler(3), ang vel(3), qpos(12), qvel(12))
+        if not hasattr(self, 'ref_state_tensor'):
+            ref_np = self.ref_df_data  # already numpy array
+            if ref_np.shape[1] >= self.cfg.env.num_states:
+                ref_np = ref_np[:, :self.cfg.env.num_states]
+            else:
+                raise ValueError(f"Reference trajectory columns {ref_np.shape[1]} < expected {self.cfg.env.num_states}")
+            self.ref_state_tensor = torch.tensor(ref_np, dtype=torch.float, device=self.device)
+            self.ref_state_len = self.ref_state_tensor.shape[0]
+        # index by (episode step) capped at last frame
+        idx = torch.clamp(self.episode_length_buf, max=self.ref_state_len - 1)
+        return self.ref_state_tensor[idx]
+
+    def _reward_imitation_state(self):
+        cur = self._build_current_state_30()
+        ref = self._get_ref_state()
+        err = torch.sum((cur - ref) ** 2, dim=-1) / cur.shape[-1]
+        # sharper penalty for large deviation
+        return torch.exp(-10.0 * err)
+
+    def _reward_stand_success(self):
+        # success if height high and orientation upright
+        roll, pitch, _ = quat_to_euler_xyz(self.base_quat)
+        height = self.root_states[:, 2]
+        upright = (height > 0.85) & (torch.abs(roll) < 0.25) & (torch.abs(pitch) < 0.25)
+        return upright.float()

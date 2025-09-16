@@ -1,28 +1,29 @@
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO, LeggedRobotCfgGAIL
 from legged_gym import LEGGED_GYM_ROOT_DIR
-import torch
 
 # ! Specify trajectory file here
-TRAJECTORY_FILE = f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/run_50Hz_4p0_24.dat"
-NUM_STATES = 24
+TRAJECTORY_FILE = f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup01.dat"
+NUM_STATES = 30
 
 class HumanoidRobotCfg(LeggedRobotCfg):
     seed = 0
     class env(LeggedRobotCfg.env):
-        # change the observation dim
-        frame_stack = 10   # Policy frame stack number
-        c_frame_stack = 3  # Critic frame stack number
+        # observation dim (no clock/phase inputs)
+        frame_stack = 10
+        c_frame_stack = 3
+        # commands(3)+dof_pos(12)+dof_vel(12)+actions(12)+base_ang_vel(3)+gravity(3)=45
         num_single_obs = 45
         num_observations = int(frame_stack * num_single_obs)
-        single_num_privileged_obs = 63 + 17
+        # privileged obs + base height -> 81
+        single_num_privileged_obs = 81
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12
         num_envs = 8192
-        episode_length_s = 20  # episode length in seconds
-        
+        episode_length_s = 20
         is_amp = True
-        num_states = NUM_STATES  # discriminator input
-        reference_state_initialization = True  # initialize state from reference data
+        num_states = NUM_STATES  # 30-dim imitation state
+        reference_state_initialization = False  # start from lying pose
+        standup_imitation = True
         
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = "plane"
@@ -43,22 +44,21 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         restitution = 0.0
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.98] # [0.0, 0.0, 0.95]
-        default_joint_angles = {  # = target angles [rad] when action = 0.0
-            "Lleg_hip_p_joint": 0.3,
-            "Lleg_hip_r_joint": 0.0,
-            "Lleg_hip_y_joint": 0.0,
-            "Lleg_knee_joint": -0.6,
-            "Lleg_ankle_p_joint": -0.3,
-            "Lleg_ankle_r_joint": 0.0,
-            "Rleg_hip_p_joint": 0.3,
-            "Rleg_hip_r_joint": 0.0,
-            "Rleg_hip_y_joint": 0.0, 
-            "Rleg_knee_joint": -0.6,
-            "Rleg_ankle_p_joint": -0.3,
-            "Rleg_ankle_r_joint": 0.0,
-            # "Larm_shoulder_p_joint": 0.0,
-            # "Rarm_shoulder_p_joint": 0.0,
+        # lying start: low height, flat joints
+        pos = [0.0, 0.0, 0.35]
+        default_joint_angles = {
+            'Lleg_hip_p_joint': 0.0,
+            'Lleg_hip_r_joint': 0.0,
+            'Lleg_hip_y_joint': 0.0,
+            'Lleg_knee_joint': 0.0,
+            'Lleg_ankle_p_joint': 0.0,
+            'Lleg_ankle_r_joint': 0.0,
+            'Rleg_hip_p_joint': 0.0,
+            'Rleg_hip_r_joint': 0.0,
+            'Rleg_hip_y_joint': 0.0,
+            'Rleg_knee_joint': 0.0,
+            'Rleg_ankle_p_joint': 0.0,
+            'Rleg_ankle_r_joint': 0.0,
         }
         init_joint_state_train = True
         init_base_angle_max = 0.1 # rad
@@ -90,20 +90,20 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         name = "hhfc"
         foot_name = "ankle_r"
         knee_name = "knee"
-        terminate_after_contacts_on = ["base"]
-        penalize_contacts_on = ["knee", "hip"]
-        self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
-        flip_visual_attachments = False
-        replace_cylinder_with_capsule = False
-        fix_base_link = False
-        
-        # reference trajectory file (for amp)
-        ref_traj = TRAJECTORY_FILE
+    # allow base contact during lying start
+    terminate_after_contacts_on = []
+    penalize_contacts_on = ["knee", "hip"]
+    self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
+    flip_visual_attachments = False
+    replace_cylinder_with_capsule = False
+    fix_base_link = False
+    # reference trajectory file (for amp)
+    ref_traj = TRAJECTORY_FILE
 
     class rewards(LeggedRobotCfg.rewards):
         base_height_target = 0.92
         foot_clearance_target = 0.08
-        foot_height_offset = 0.068 # offset of the foot height due to coordinate definition
+        foot_height_offset = 0.068
         only_positive_rewards = False
         soft_dof_pos_limit = 0.95
         soft_dof_vel_limit = 0.95
@@ -130,9 +130,11 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             feet_distance = 0.2
             knee_distance = 0.2
             
-            # task
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
+            # task: disable locomotion tracking & add imitation
+            tracking_lin_vel = 0.0
+            tracking_ang_vel = 0.0
+            imitation_state = 3.0  # exp(-state error)
+            stand_success = 2.0    # bonus when upright
             # foot_clearance = 0.0
     
     class commands(LeggedRobotCfg.commands):
