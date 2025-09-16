@@ -189,13 +189,14 @@ class HumanoidRobot(LeggedRobot):
     def compute_policy_state(self):
         """ Computes policy_state for discriminator
         """
-    # 30-dim: base_euler(3) + base_ang_vel(3) + dof_pos(12) + dof_vel(12)
-    roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
-    base_euler = torch.stack((roll, pitch, yaw), dim=-1)
-    self.state_buf = torch.cat((base_euler,
-                    self.base_ang_vel,
-                    self.dof_pos,
-                    self.dof_vel), dim=-1)
+        # 30-dim: base_euler(3) + base_ang_vel(3) + dof_pos(12) + dof_vel(12)
+        roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
+        base_euler = torch.stack((roll, pitch, yaw), dim=-1)
+        self.state_buf = torch.cat((base_euler,
+                                    self.base_ang_vel,
+                                    self.dof_pos,
+                                    self.dof_vel
+                                    ), dim=-1)
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
