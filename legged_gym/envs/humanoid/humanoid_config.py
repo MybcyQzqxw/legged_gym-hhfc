@@ -90,15 +90,15 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         name = "hhfc"
         foot_name = "ankle_r"
         knee_name = "knee"
-    # allow base contact during lying start
-    terminate_after_contacts_on = []
-    penalize_contacts_on = ["knee", "hip"]
-    self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
-    flip_visual_attachments = False
-    replace_cylinder_with_capsule = False
-    fix_base_link = False
-    # reference trajectory file (for amp)
-    ref_traj = TRAJECTORY_FILE
+        # allow base contact during lying start
+        terminate_after_contacts_on = []
+        penalize_contacts_on = ["knee", "hip"]
+        self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
+        flip_visual_attachments = False
+        replace_cylinder_with_capsule = False
+        fix_base_link = False
+        # reference trajectory file (for amp)
+        ref_traj = TRAJECTORY_FILE
 
     class rewards(LeggedRobotCfg.rewards):
         base_height_target = 0.92
@@ -198,7 +198,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             height_measurements = 0.1
     
     class sim(LeggedRobotCfg.sim):
-        dt =  0.005
+        dt = 0.005
         substeps = 1
         up_axis = 1  # 0 is y, 1 is z
 
