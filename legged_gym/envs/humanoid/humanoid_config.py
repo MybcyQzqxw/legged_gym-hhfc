@@ -111,6 +111,8 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         min_dist = 0.25
         max_dist = 0.6
         class scales(LeggedRobotCfg.rewards.scales):
+            tracking_lin_vel = 0.0
+            tracking_ang_vel = 0.0
             # limit
             termination = -200.0
             dof_pos_limits = -2.0
