@@ -111,8 +111,6 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         min_dist = 0.25
         max_dist = 0.6
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 1e-8
-            tracking_ang_vel = 1e-8
             # limit
             termination = -200.0
             dof_pos_limits = -2.0
@@ -133,8 +131,8 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             knee_distance = 0.2
             
             # task: disable locomotion tracking & add imitation
-            tracking_lin_vel = 0.0
-            tracking_ang_vel = 0.0
+            tracking_lin_vel = 1e-8
+            tracking_ang_vel = 1e-8
             imitation_state = 3.0  # exp(-state error)
             stand_success = 2.0    # bonus when upright
             # foot_clearance = 0.0
