@@ -56,18 +56,18 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         # lying start: low height, flat joints
         pos = [0.0, 0.0, 0.35]
         default_joint_angles = {
-            'Lleg_hip_p_joint': 0.0,
-            'Lleg_hip_r_joint': 0.0,
-            'Lleg_hip_y_joint': 0.0,
-            'Lleg_knee_joint': 0.0,
-            'Lleg_ankle_p_joint': 0.0,
-            'Lleg_ankle_r_joint': 0.0,
-            'Rleg_hip_p_joint': 0.0,
-            'Rleg_hip_r_joint': 0.0,
-            'Rleg_hip_y_joint': 0.0,
-            'Rleg_knee_joint': 0.0,
-            'Rleg_ankle_p_joint': 0.0,
-            'Rleg_ankle_r_joint': 0.0,
+            "Lleg_hip_p_joint": 0.0,
+            "Lleg_hip_r_joint": 0.0,
+            "Lleg_hip_y_joint": 0.0,
+            "Lleg_knee_joint": 0.0,
+            "Lleg_ankle_p_joint": 0.0,
+            "Lleg_ankle_r_joint": 0.0,
+            "Rleg_hip_p_joint": 0.0,
+            "Rleg_hip_r_joint": 0.0,
+            "Rleg_hip_y_joint": 0.0,
+            "Rleg_knee_joint": 0.0,
+            "Rleg_ankle_p_joint": 0.0,
+            "Rleg_ankle_r_joint": 0.0,
         }
         init_joint_state_train = True  # 随机初始化关节状态
         init_base_angle_max = 0.1  # 初始机身姿态角度扰动的最大范围（rad）
