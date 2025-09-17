@@ -4,10 +4,11 @@ from legged_gym.envs.base.legged_robot_config import (
 )
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
-# ! Specify trajectory file here
+# 参考轨迹文件
 TRAJECTORY_FILE = (
     f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup01.dat"
 )
+# 状态维度
 NUM_STATES = 30
 
 
@@ -107,7 +108,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         flip_visual_attachments = False  # 是否翻转视觉附件
         replace_cylinder_with_capsule = False  # 是否更换模型中的圆柱体为胶囊体
         fix_base_link = False  # 是否固定机身
-        # 参考轨迹文件 (for amp)
+        # 参考轨迹文件
         ref_traj = TRAJECTORY_FILE
 
     class rewards(LeggedRobotCfg.rewards):
