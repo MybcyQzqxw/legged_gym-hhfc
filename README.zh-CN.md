@@ -78,7 +78,7 @@
 
 2. **运行训练好的策略**：
    ```bash
-   python issacgym_anymal/scripts/play.py --task=anymal_c_flat
+   python legged_gym/play.py --task=humanoid
    ```
    - 默认加载的是实验文件夹中最后一次运行的最后一个模型
    - 可以通过在训练配置中设置`load_run`和`checkpoint`来选择其他运行/模型迭代

@@ -227,7 +227,8 @@ class HumanoidRobotCfgGAIL(LeggedRobotCfgGAIL):
         save_interval = 200  # check for potential saves every this many iterations
         # load and resume
         resume = False
-        load_run = "Jul15_15-50-28_24"  # -1 = last run
+        # load_run = 'Jul15_15-50-28_24'
+        load_run = -1
         run_name = '24'
 
     class algorithm(LeggedRobotCfgGAIL.algorithm):
