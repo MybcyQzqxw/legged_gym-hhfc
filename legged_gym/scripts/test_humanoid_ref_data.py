@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -28,17 +28,17 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from legged_gym import LEGGED_GYM_ROOT_DIR
+import csv
 import os
 
 import isaacgym
-from legged_gym.envs import *
-from legged_gym.utils import get_args, export_policy_as_jit, task_registry, Logger
-from isaacgym import gymtorch, gymapi, gymutil
-
 import numpy as np
 import torch
-import csv
+from isaacgym import gymapi, gymtorch, gymutil
+
+from legged_gym import LEGGED_GYM_ROOT_DIR
+from legged_gym.envs import *
+from legged_gym.utils import Logger, export_policy_as_jit, get_args, task_registry
 
 
 def play(args):
@@ -56,10 +56,10 @@ def play(args):
     env.test_ref_data()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     EXPORT_POLICY = True
     RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args()
-    args.task = 'humanoid'
+    args.task = "humanoid"
     play(args)

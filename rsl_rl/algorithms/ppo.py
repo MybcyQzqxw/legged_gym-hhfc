@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -35,28 +35,32 @@ import torch.optim as optim
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
 from rsl_rl.storage import RolloutStorage
 
-'''
+"""
 name: class PPO
 - PPO算法
-'''
+"""
+
+
 class PPO:
     actor_critic: ActorCriticRecurrent
-    def __init__(self,
-                 actor_critic,
-                 num_learning_epochs=1,
-                 num_mini_batches=1,
-                 clip_param=0.2,
-                 gamma=0.998,
-                 lam=0.95,
-                 value_loss_coef=1.0,
-                 entropy_coef=0.0,
-                 learning_rate=1e-3,
-                 max_grad_norm=1.0,
-                 use_clipped_value_loss=True,
-                 schedule="fixed",
-                 desired_kl=0.01,
-                 device='cpu',
-                 ):
+
+    def __init__(
+        self,
+        actor_critic,
+        num_learning_epochs=1,
+        num_mini_batches=1,
+        clip_param=0.2,
+        gamma=0.998,
+        lam=0.95,
+        value_loss_coef=1.0,
+        entropy_coef=0.0,
+        learning_rate=1e-3,
+        max_grad_norm=1.0,
+        use_clipped_value_loss=True,
+        schedule="fixed",
+        desired_kl=0.01,
+        device="cpu",
+    ):
 
         self.device = device
 
@@ -68,7 +72,7 @@ class PPO:
         # optimizer是梯度上升时用的优化器，Adam
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
-        self.storage = None # initialized later
+        self.storage = None  # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
 
@@ -83,8 +87,22 @@ class PPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
+    def init_storage(
+        self,
+        num_envs,
+        num_transitions_per_env,
+        actor_obs_shape,
+        critic_obs_shape,
+        action_shape,
+    ):
+        self.storage = RolloutStorage(
+            num_envs,
+            num_transitions_per_env,
+            actor_obs_shape,
+            critic_obs_shape,
+            action_shape,
+            self.device,
+        )
 
     def test_mode(self):
         self.actor_critic.test()
@@ -98,7 +116,9 @@ class PPO:
         # Compute the actions and values
         self.transition.actions = self.actor_critic.act(obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
-        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
+        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(
+            self.transition.actions
+        ).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
@@ -110,8 +130,12 @@ class PPO:
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # Bootstrapping on time outs
-        if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+        if "time_outs" in infos:
+            self.transition.rewards += self.gamma * torch.squeeze(
+                self.transition.values
+                * infos["time_outs"].unsqueeze(1).to(self.device),
+                1,
+            )
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -121,7 +145,7 @@ class PPO:
     # 计算return, 在rollout_storage.py, 计算了折扣回报和advantages
     # rollout_storage.py
     def compute_returns(self, last_critic_obs):
-        last_values= self.actor_critic.evaluate(last_critic_obs).detach()
+        last_values = self.actor_critic.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     # 更新network
@@ -129,77 +153,113 @@ class PPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         if self.actor_critic.is_recurrent:
-            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            generator = self.storage.reccurent_mini_batch_generator(
+                self.num_mini_batches, self.num_learning_epochs
+            )
         else:
-            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+            generator = self.storage.mini_batch_generator(
+                self.num_mini_batches, self.num_learning_epochs
+            )
+        for (
+            obs_batch,
+            critic_obs_batch,
+            actions_batch,
+            target_values_batch,
+            advantages_batch,
+            returns_batch,
+            old_actions_log_prob_batch,
+            old_mu_batch,
+            old_sigma_batch,
+            hid_states_batch,
+            masks_batch,
+        ) in generator:
 
-                self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
-                actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
-                value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
-                mu_batch = self.actor_critic.action_mean
-                sigma_batch = self.actor_critic.action_std
-                entropy_batch = self.actor_critic.entropy
+            self.actor_critic.act(
+                obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]
+            )
+            actions_log_prob_batch = self.actor_critic.get_actions_log_prob(
+                actions_batch
+            )
+            value_batch = self.actor_critic.evaluate(
+                critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1]
+            )
+            mu_batch = self.actor_critic.action_mean
+            sigma_batch = self.actor_critic.action_std
+            entropy_batch = self.actor_critic.entropy
 
-                # KL 散度的计算，改变学习率，防止importance sample的两个概率相差太大
-                if self.desired_kl != None and self.schedule == 'adaptive':
-                    with torch.inference_mode():
-                        kl = torch.sum(
-                            torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
-                        kl_mean = torch.mean(kl)
+            # KL 散度的计算，改变学习率，防止importance sample的两个概率相差太大
+            if self.desired_kl is not None and self.schedule == "adaptive":
+                with torch.inference_mode():
+                    kl = torch.sum(
+                        torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                        + (
+                            torch.square(old_sigma_batch)
+                            + torch.square(old_mu_batch - mu_batch)
+                        )
+                        / (2.0 * torch.square(sigma_batch))
+                        - 0.5,
+                        axis=-1,
+                    )
+                    kl_mean = torch.mean(kl)
 
-                        if kl_mean > self.desired_kl * 2.0:
-                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                    if kl_mean > self.desired_kl * 2.0:
+                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                    elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
-                        for param_group in self.optimizer.param_groups:
-                            param_group['lr'] = self.learning_rate
+                    for param_group in self.optimizer.param_groups:
+                        param_group["lr"] = self.learning_rate
 
+            # Surrogate loss 计算actor的loss
+            # PPO算法的核心部分 ratio就是算两个action_prob之间的比率（不能差太大）
+            # ratio*advantage的期望就是用于梯度的loss_function，但是需要clip限幅
+            # actor网络需要输出的动作优势尽可能的大
+            ratio = torch.exp(
+                actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
+            )
+            surrogate = -torch.squeeze(advantages_batch) * ratio
+            surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
+                ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+            )
+            surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
-                # Surrogate loss 计算actor的loss
-                # PPO算法的核心部分 ratio就是算两个action_prob之间的比率（不能差太大）
-                # ratio*advantage的期望就是用于梯度的loss_function，但是需要clip限幅
-                # actor网络需要输出的动作优势尽可能的大
-                ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
-                surrogate = -torch.squeeze(advantages_batch) * ratio
-                surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
-                                                                                1.0 + self.clip_param)
-                surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
+            # Value function loss
+            # value的估计值和回报之间作差 MSE 均方差
+            # target_value = returns = advantages + values (参考CSDN, TD)
+            # TD_error = value - returns, loss = TD_error^2
+            if self.use_clipped_value_loss:
+                # 如果是value function loss clipping (效果一般) 则有
+                # L_v = max[(value(t)-return)^2, ((value(t-1) + clip(value(t)-value(t-1)，-epsilon,epsilon))-return)^2]
+                # clipped_TD_error = clipped_value - returns
+                # loss = max[TD_error^2, clipped_TD_error^2]
+                # 在这里面 target_values_batch 应该表示的是前一个时刻的预测值？ value(t-1)
+                value_clipped = target_values_batch + (
+                    value_batch - target_values_batch
+                ).clamp(-self.clip_param, self.clip_param)
+                value_losses = (value_batch - returns_batch).pow(2)
+                value_losses_clipped = (value_clipped - returns_batch).pow(2)
+                value_loss = torch.max(value_losses, value_losses_clipped).mean()
+            else:
+                value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                # Value function loss
-                # value的估计值和回报之间作差 MSE 均方差
-                # target_value = returns = advantages + values (参考CSDN, TD)
-                # TD_error = value - returns, loss = TD_error^2
-                if self.use_clipped_value_loss:
-                    # 如果是value function loss clipping (效果一般) 则有
-                    # L_v = max[(value(t)-return)^2, ((value(t-1) + clip(value(t)-value(t-1)，-epsilon,epsilon))-return)^2]
-                    # clipped_TD_error = clipped_value - returns
-                    # loss = max[TD_error^2, clipped_TD_error^2]
-                    # 在这里面 target_values_batch 应该表示的是前一个时刻的预测值？ value(t-1)
-                    value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(-self.clip_param,
-                                                                                                    self.clip_param)
-                    value_losses = (value_batch - returns_batch).pow(2)
-                    value_losses_clipped = (value_clipped - returns_batch).pow(2)
-                    value_loss = torch.max(value_losses, value_losses_clipped).mean()
-                else:
-                    value_loss = (returns_batch - value_batch).pow(2).mean()
+            bounding_loss = self.bounding_action_space(actions_batch)
 
-                bounding_loss = self.bounding_action_space(actions_batch)
+            # actor-critic共享一个网络，计算最终的损失函数，熵损失entropy鼓励actor探索更多的行为（根据概率分布计算策略的熵)
+            loss = (
+                surrogate_loss
+                + self.value_loss_coef * value_loss
+                - self.entropy_coef * entropy_batch.mean()
+                + 5.0 * bounding_loss
+            )
 
-                # actor-critic共享一个网络，计算最终的损失函数，熵损失entropy鼓励actor探索更多的行为（根据概率分布计算策略的熵)
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() \
-                    + 5. * bounding_loss
+            # Gradient step 梯度上升
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+            self.optimizer.step()
 
-                # Gradient step 梯度上升
-                self.optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
-                self.optimizer.step()
-
-                mean_value_loss += value_loss.item()
-                mean_surrogate_loss += surrogate_loss.item()
+            mean_value_loss += value_loss.item()
+            mean_surrogate_loss += surrogate_loss.item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -208,7 +268,7 @@ class PPO:
 
         return mean_value_loss, mean_surrogate_loss
 
-    def bounding_action_space(self, action, lower=-15., upper=15.):
+    def bounding_action_space(self, action, lower=-15.0, upper=15.0):
         """
         L_bound:
         = 0                             if  lower < mu < upper
@@ -223,4 +283,3 @@ class PPO:
 
         loss_bounding = bounding_upper + bounding_lower
         return loss_bounding
-

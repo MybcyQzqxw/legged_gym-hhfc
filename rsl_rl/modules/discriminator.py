@@ -29,28 +29,32 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 import numpy as np
-
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
-'''
+"""
 name: class DiscriminatorNN
 - create Disc NN network
-'''
+"""
 
 
 class DiscriminatorNN(nn.Module):
 
-    def __init__(self, num_state,
-                 num_output=1,
-                 hidden_dims=[512, 256],
-                 init_noise_std=1.0,
-                 **kwargs):
+    def __init__(
+        self,
+        num_state,
+        num_output=1,
+        hidden_dims=[512, 256],
+        init_noise_std=1.0,
+        **kwargs,
+    ):
         if kwargs:
-            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str(
-                [key for key in kwargs.keys()]))
+            print(
+                "ActorCritic.__init__ got unexpected arguments, which will be ignored: "
+                + str([key for key in kwargs.keys()])
+            )
         super(DiscriminatorNN, self).__init__()
 
         mlp_input_dim_a = num_state
@@ -80,12 +84,15 @@ class DiscriminatorNN(nn.Module):
 
         # print(f"Discriminator MLP: {self.disc}")
 
-
     @staticmethod
     # not used at the moment
     def init_weights(sequential, scales):
-        [torch.nn.init.orthogonal_(module.weight, gain=scales[idx]) for idx, module in
-         enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
+        [
+            torch.nn.init.orthogonal_(module.weight, gain=scales[idx])
+            for idx, module in enumerate(
+                mod for mod in sequential if isinstance(mod, nn.Linear)
+            )
+        ]
 
     def reset(self, dones=None):
         pass
@@ -94,6 +101,7 @@ class DiscriminatorNN(nn.Module):
         h = self.trunk(x)
         d = self.disc_linear(h)
         return d
+
 
 # 激活函数的设置
 def get_activation(act_name):

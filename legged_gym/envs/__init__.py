@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
@@ -28,14 +28,16 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
+import os
+
+from legged_gym import LEGGED_GYM_ENVS_DIR, LEGGED_GYM_ROOT_DIR
+from legged_gym.utils.task_registry import task_registry
+
 from .base.legged_robot import LeggedRobot
 from .base.legged_robot_config import LeggedRobotCfg
 from .humanoid.humanoid import HumanoidRobot
 from .humanoid.humanoid_config import HumanoidRobotCfg, HumanoidRobotCfgGAIL
 
-import os
-
-from legged_gym.utils.task_registry import task_registry
-
-task_registry.register( "humanoid", HumanoidRobot, HumanoidRobotCfg(), HumanoidRobotCfgGAIL() )
+task_registry.register(
+    "humanoid", HumanoidRobot, HumanoidRobotCfg(), HumanoidRobotCfgGAIL()
+)

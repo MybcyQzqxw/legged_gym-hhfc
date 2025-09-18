@@ -1,22 +1,20 @@
+import copy
 import random
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
 from torch import autograd
 
-import copy
-
-from rsl_rl.modules import ActorCritic
-from rsl_rl.modules import DiscriminatorNN
-from rsl_rl.storage import RolloutStorage
-from rsl_rl.storage import SampleStorage
-
+from rsl_rl.modules import ActorCritic, DiscriminatorNN
+from rsl_rl.storage import RolloutStorage, SampleStorage
 
 BATCH_SIZE = 64
 
-''' GAIL: Generative Adversarial Imitation Learning'''
+""" GAIL: Generative Adversarial Imitation Learning"""
+
+
 class GAIL:
     """
     Generative Adversarial Imitation Learning
@@ -24,27 +22,30 @@ class GAIL:
     Main idea of the algorithm:
 
     """
+
     actor_critic: ActorCritic
     disc: DiscriminatorNN
-    def __init__(self,
-                 actor_critic,
-                 disc,
-                 gail_normalizer,
-                 num_state,
-                 num_learning_epochs=1,
-                 num_mini_batches=1,
-                 clip_param=0.2,
-                 gamma=0.998,
-                 lam=0.95,
-                 value_loss_coef=1.0,
-                 entropy_coef=0.0,
-                 learning_rate=1e-3,
-                 max_grad_norm=1.0,
-                 use_clipped_value_loss=True,
-                 schedule="fixed",
-                 desired_kl=0.01,
-                 device='cpu',
-                 ):
+
+    def __init__(
+        self,
+        actor_critic,
+        disc,
+        gail_normalizer,
+        num_state,
+        num_learning_epochs=1,
+        num_mini_batches=1,
+        clip_param=0.2,
+        gamma=0.998,
+        lam=0.95,
+        value_loss_coef=1.0,
+        entropy_coef=0.0,
+        learning_rate=1e-3,
+        max_grad_norm=1.0,
+        use_clipped_value_loss=True,
+        schedule="fixed",
+        desired_kl=0.01,
+        device="cpu",
+    ):
         self.device = device
 
         self.desired_kl = desired_kl
@@ -76,10 +77,17 @@ class GAIL:
         if self.disc is not None:
             self.disc.to(self.device)
             disc_params = [
-                {'params': self.disc.trunk.parameters(),
-                 'weight_decay': 10e-4, 'name': 'disc_trunk'},
-                {'params': self.disc.disc_linear.parameters(),
-                 'weight_decay': 10e-2, 'name': 'disc_head'}]
+                {
+                    "params": self.disc.trunk.parameters(),
+                    "weight_decay": 10e-4,
+                    "name": "disc_trunk",
+                },
+                {
+                    "params": self.disc.disc_linear.parameters(),
+                    "weight_decay": 10e-2,
+                    "name": "disc_head",
+                },
+            ]
             self.disc_optimizer = optim.Adam(disc_params, lr=1e-3)
 
         self.gail_normalizer = gail_normalizer
@@ -87,21 +95,25 @@ class GAIL:
 
         self.sample_storage = None
 
-        self.loss_fn = get_adversarial_losses_fn('lsgan')
-
+        self.loss_fn = get_adversarial_losses_fn("lsgan")
 
     def disc_update(self):
         loss = 0.0
         num_step = self.sample_storage.num_step
         expert_rollout = self.sample_storage.expert_observation
-        policy_rollout = self.sample_storage.policy_state[:num_step,:,:]
+        policy_rollout = self.sample_storage.policy_state[:num_step, :, :]
 
         for _ in range(self.epoch):
             # generate n=BATCH_SIZE random indices for policy data
-            policy_indices = torch.tensor(random.sample(range(policy_rollout.shape[1]), BATCH_SIZE), device=self.device)
+            policy_indices = torch.tensor(
+                random.sample(range(policy_rollout.shape[1]), BATCH_SIZE),
+                device=self.device,
+            )
 
             # generate n=BATCH_SIZE random indices for expert data
-            expert_indices = torch.randperm(expert_rollout.size(0)-num_step)[:BATCH_SIZE]
+            expert_indices = torch.randperm(expert_rollout.size(0) - num_step)[
+                :BATCH_SIZE
+            ]
 
             # initialize empty tensor to storage the selected rows (batch)
             # expert_batch = torch.empty(0, expert_rollout.size(1), dtype=expert_rollout.dtype)
@@ -109,14 +121,16 @@ class GAIL:
 
             # select num_step of data starting from each random index
             for index in expert_indices:
-                expert_selected = expert_rollout[index:index+num_step, :].reshape(1,-1)
+                expert_selected = expert_rollout[index : index + num_step, :].reshape(
+                    1, -1
+                )
                 expert_batch_list.append(expert_selected)
 
             expert_batch = torch.cat((expert_batch_list)).to(torch.float32)
 
             # select from each random index and flatten dimension
-            policy_batch = policy_rollout[:,policy_indices,:].to(torch.float32)
-            policy_batch = policy_batch.permute(1,0,2).reshape(BATCH_SIZE,-1)
+            policy_batch = policy_rollout[:, policy_indices, :].to(torch.float32)
+            policy_batch = policy_batch.permute(1, 0, 2).reshape(BATCH_SIZE, -1)
 
             if self.gail_normalizer is not None:
                 with torch.no_grad():
@@ -124,8 +138,16 @@ class GAIL:
                     for i in range(num_step):
                         start_step = end_step
                         end_step += self.num_state
-                        expert_batch[:,start_step:end_step] = self.gail_normalizer.normalize_torch(expert_batch[:, start_step:end_step], self.device)
-                        policy_batch[:,start_step:end_step] = self.gail_normalizer.normalize_torch(policy_batch[:, start_step:end_step], self.device)
+                        expert_batch[:, start_step:end_step] = (
+                            self.gail_normalizer.normalize_torch(
+                                expert_batch[:, start_step:end_step], self.device
+                            )
+                        )
+                        policy_batch[:, start_step:end_step] = (
+                            self.gail_normalizer.normalize_torch(
+                                policy_batch[:, start_step:end_step], self.device
+                            )
+                        )
 
             # disc_input = torch.cat([expert_batch, policy_batch]).to(torch.float)
             expert_d = self.disc(expert_batch).flatten()
@@ -145,22 +167,46 @@ class GAIL:
 
             if self.gail_normalizer is not None:
                 # a = policy_batch.cpu().numpy()
-                self.gail_normalizer.update(policy_batch[:,:self.num_state].cpu().numpy())
-                self.gail_normalizer.update(expert_batch[:,:self.num_state].cpu().numpy())
+                self.gail_normalizer.update(
+                    policy_batch[:, : self.num_state].cpu().numpy()
+                )
+                self.gail_normalizer.update(
+                    expert_batch[:, : self.num_state].cpu().numpy()
+                )
 
         # clear the sample storage: raise AssertionError("Samples Rollout buffer overflow")
         self.sample_storage.clear()
 
-        return loss/self.epoch
+        return loss / self.epoch
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape,
-                                      action_shape, self.device)
+    def init_storage(
+        self,
+        num_envs,
+        num_transitions_per_env,
+        actor_obs_shape,
+        critic_obs_shape,
+        action_shape,
+    ):
+        self.storage = RolloutStorage(
+            num_envs,
+            num_transitions_per_env,
+            actor_obs_shape,
+            critic_obs_shape,
+            action_shape,
+            self.device,
+        )
 
-    def init_sample_storage(self, num_envs, num_transitions_per_env, num_step, 
-                            num_state, ref_traj):
-        self.sample_storage = SampleStorage(num_envs, num_transitions_per_env, num_step, 
-                                            num_state, ref_traj, self.device)
+    def init_sample_storage(
+        self, num_envs, num_transitions_per_env, num_step, num_state, ref_traj
+    ):
+        self.sample_storage = SampleStorage(
+            num_envs,
+            num_transitions_per_env,
+            num_step,
+            num_state,
+            ref_traj,
+            self.device,
+        )
 
     def test_mode(self):
         self.actor_critic.test()
@@ -174,7 +220,9 @@ class GAIL:
         # Compute the actions and values
         self.transition.actions = self.actor_critic.act(obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
-        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
+        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(
+            self.transition.actions
+        ).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
@@ -186,7 +234,6 @@ class GAIL:
         self.sample_transition.dis = self.disc(joint_state).detach()
         return self.sample_transition.dis
 
-
     def sample_state(self, state):
         # need: the orientation of base (euler angle), the linear and angular velocities of base
         # and the position and velocities of joint
@@ -196,9 +243,12 @@ class GAIL:
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # Bootstrapping on time outs
-        if 'time_outs' in infos:
+        if "time_outs" in infos:
             self.transition.rewards += self.gamma * torch.squeeze(
-                self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+                self.transition.values
+                * infos["time_outs"].unsqueeze(1).to(self.device),
+                1,
+            )
 
         # Record the transition
         self.storage.add_transitions(self.transition)
@@ -220,28 +270,54 @@ class GAIL:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         if self.actor_critic.is_recurrent:
-            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            generator = self.storage.reccurent_mini_batch_generator(
+                self.num_mini_batches, self.num_learning_epochs
+            )
         else:
-            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-                old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+            generator = self.storage.mini_batch_generator(
+                self.num_mini_batches, self.num_learning_epochs
+            )
+        for (
+            obs_batch,
+            critic_obs_batch,
+            actions_batch,
+            target_values_batch,
+            advantages_batch,
+            returns_batch,
+            old_actions_log_prob_batch,
+            old_mu_batch,
+            old_sigma_batch,
+            hid_states_batch,
+            masks_batch,
+        ) in generator:
 
             # 动作概率分布的log，value的值，动作的均质和方差
-            self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
-            actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
-            value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch,
-                                                     hidden_states=hid_states_batch[1])
+            self.actor_critic.act(
+                obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0]
+            )
+            actions_log_prob_batch = self.actor_critic.get_actions_log_prob(
+                actions_batch
+            )
+            value_batch = self.actor_critic.evaluate(
+                critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1]
+            )
             mu_batch = self.actor_critic.action_mean
             sigma_batch = self.actor_critic.action_std
             entropy_batch = self.actor_critic.entropy
 
             # KL 散度的计算，改变学习率，防止importance sample的两个概率相差太大
-            if self.desired_kl != None and self.schedule == 'adaptive':
+            if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
                     kl = torch.sum(
-                        torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (
-                                    torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (
-                                    2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
+                        torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                        + (
+                            torch.square(old_sigma_batch)
+                            + torch.square(old_mu_batch - mu_batch)
+                        )
+                        / (2.0 * torch.square(sigma_batch))
+                        - 0.5,
+                        axis=-1,
+                    )
                     kl_mean = torch.mean(kl)
 
                     if kl_mean > self.desired_kl * 2.0:
@@ -250,16 +326,19 @@ class GAIL:
                         self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
                     for param_group in self.optimizer.param_groups:
-                        param_group['lr'] = self.learning_rate
+                        param_group["lr"] = self.learning_rate
 
             # Surrogate loss 计算actor的loss
             # PPO算法的核心部分 ratio就是算两个action_prob之间的比率（不能差太大）
             # ratio*advantage的期望就是用于梯度的loss_function，但是需要clip限幅
             # actor网络需要输出的动作优势尽可能的大
-            ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
+            ratio = torch.exp(
+                actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
+            )
             surrogate = -torch.squeeze(advantages_batch) * ratio
-            surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
-                                                                               1.0 + self.clip_param)
+            surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
+                ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+            )
             surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
             # Value function loss
@@ -272,8 +351,9 @@ class GAIL:
                 # clipped_TD_error = clipped_value - returns
                 # loss = max[TD_error^2, clipped_TD_error^2]
                 # 在这里面 target_values_batch 应该表示的是前一个时刻的预测值？ value(t-1)
-                value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(-self.clip_param,
-                                                                                                self.clip_param)
+                value_clipped = target_values_batch + (
+                    value_batch - target_values_batch
+                ).clamp(-self.clip_param, self.clip_param)
                 value_losses = (value_batch - returns_batch).pow(2)
                 value_losses_clipped = (value_clipped - returns_batch).pow(2)
                 value_loss = torch.max(value_losses, value_losses_clipped).mean()
@@ -281,7 +361,11 @@ class GAIL:
                 value_loss = (returns_batch - value_batch).pow(2).mean()
 
             # actor-critic共享一个网络，计算最终的损失函数，熵损失entropy鼓励actor探索更多的行为（根据概率分布计算策略的熵)
-            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+            loss = (
+                surrogate_loss
+                + self.value_loss_coef * value_loss
+                - self.entropy_coef * entropy_batch.mean()
+            )
 
             # Gradient step 梯度上升
             self.optimizer.zero_grad()
@@ -299,11 +383,13 @@ class GAIL:
 
         return mean_value_loss, mean_surrogate_loss
 
-    def logits_expert_is_high(self,
-                              state: torch.Tensor,
-                              action: torch.Tensor,
-                              next_state: torch.Tensor,
-                              done: torch.Tensor):
+    def logits_expert_is_high(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        next_state: torch.Tensor,
+        done: torch.Tensor,
+    ):
         """Compute the discriminator's logits for each state-action sample ?
 
         A high value corresponds to predicting expert, and a low value corresponds yo predicting generator.
@@ -337,7 +423,8 @@ class GAIL:
             grad_outputs=ones,
             create_graph=True,
             retain_graph=True,
-            only_inputs=True)[0]
+            only_inputs=True,
+        )[0]
 
         grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
         return grad_pen
@@ -353,6 +440,7 @@ def get_gan_losses_fun():
 
     return dis_loss_fn
 
+
 def get_lsgan_losses_fun():
     mse = torch.nn.MSELoss()
 
@@ -367,10 +455,9 @@ def get_lsgan_losses_fun():
 
     return dis_loss_fn
 
+
 def get_adversarial_losses_fn(mode):
-    if mode == 'gan':
+    if mode == "gan":
         return get_gan_losses_fun()
-    elif mode =='lsgan':
+    elif mode == "lsgan":
         return get_lsgan_losses_fun()
-
-

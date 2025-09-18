@@ -8,7 +8,8 @@ class SlNetwork(nn.Module):
     Supervised Learning Network
 
     """
-    def __init__(self, input_dims, output_dims, hidden_dims=[256,256]):
+
+    def __init__(self, input_dims, output_dims, hidden_dims=[256, 256]):
         super(SlNetwork, self).__init__()
 
         layers = []
@@ -28,4 +29,3 @@ class SlNetwork(nn.Module):
     def forward(self, x):
         x = self.net(x)
         return x
-

@@ -1,15 +1,19 @@
-import torch
 import numpy as np
+import torch
+
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
 
-class Symmetry():
+
+class Symmetry:
     def __init__(self, cfg: LeggedRobotCfg):
         # convert to a list
         self.mirror_indices = [
-            cfg.env.mirror_indices["sideneg_obs_inds"] + cfg.env.mirror_indices["neg_obs_inds"],
+            cfg.env.mirror_indices["sideneg_obs_inds"]
+            + cfg.env.mirror_indices["neg_obs_inds"],
             cfg.env.mirror_indices["right_obs_inds"],
             cfg.env.mirror_indices["left_obs_inds"],
-            cfg.env.mirror_indices["neg_act_inds"] + cfg.env.mirror_indices["sideneg_act_inds"],
+            cfg.env.mirror_indices["neg_act_inds"]
+            + cfg.env.mirror_indices["sideneg_act_inds"],
             cfg.env.mirror_indices["right_act_inds"],
             cfg.env.mirror_indices["left_act_inds"],
         ]
@@ -73,15 +77,13 @@ class Symmetry():
             )
 
         return mirror_function
-    
+
     def mirror_action(self, actions):
         negation_action_indices = self.mirror_indices[3]
         right_action_indices = self.mirror_indices[4]
         left_action_indices = self.mirror_indices[5]
-        
+
         def swap_lr(t, r, l):
-                t[:, np.concatenate((r, l))] = t[:, np.concatenate((l, r))]
-        
+            t[:, np.concatenate((r, l))] = t[:, np.concatenate((l, r))]
+
         actions_clone = actions.clone()
-        
-        
