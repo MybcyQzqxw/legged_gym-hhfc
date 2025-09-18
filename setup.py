@@ -12,5 +12,6 @@ setup(
     install_requires=['isaacgym',
                       'rsl-rl',
                       'matplotlib',
-                      'onnx']
+                      'onnx',
+                      'pre-commit']
 )

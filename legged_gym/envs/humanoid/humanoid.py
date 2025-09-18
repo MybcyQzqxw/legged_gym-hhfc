@@ -1,16 +1,7 @@
-from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs.base.legged_robot import LeggedRobot
-
-
-from isaacgym.torch_utils import *
-from isaacgym import gymtorch, gymapi
-
-import os
+from isaacgym import gymtorch
 import torch
-import pandas as pd
-from legged_gym.envs.humanoid.humanoid_config import HumanoidRobotCfg
 from legged_gym.utils.math import wrap_to_pi
-from scipy.stats import vonmises
 from collections import deque
 
 
@@ -43,10 +34,7 @@ def quat_to_euler_xyz(quat: torch.Tensor):
 class HumanoidRobot(LeggedRobot):
 
     def test_ref_data(self):
-        ''' 读取参考轨迹，和轨迹长度'ref_step_max' '''
-        
         self.ref_step_counter_state = 0
-        
         # determine reference data according to num_states
         if self.cfg.env.num_states == 31:  # contains quaternion, base angular velocity
             ref_base_orientation = torch.tensor(self.ref_df_data[:, 0:4]).cuda()
