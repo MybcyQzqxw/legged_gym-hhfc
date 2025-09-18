@@ -1,19 +1,20 @@
 [flake8]
 max-line-length = 88
 extend-ignore =
-    E203,  # black 推荐忽略
-    W503,  # black 推荐忽略
-    E501,  # line too long，交给 black
-    E712,  # == True / False
-    F401,  # unused import
-    F403,  # import *
-    F405,  # from ... import * 未定义
-    F821,  # 未定义变量（很多是 import * 的问题）
-    F841,  # 变量定义但未使用
-    F541,  # f-string 没占位符
-    B001,  # bare except
-    E722,  # bare except
-    B006, B007,  # 默认可变参数 & 未使用的循环变量
-    E741,  # 模糊变量名 l, O, I
-    W605,  # 无效转义符
-    F811,  # 变量/函数重复定义
+    E203,
+    W503,
+    E501,
+    E712,
+    F401,
+    F403,
+    F405,
+    F821,
+    F841,
+    F541,
+    B001,
+    E722,
+    B006,
+    B007,
+    E741,
+    W605,
+    F811
