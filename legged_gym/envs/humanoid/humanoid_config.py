@@ -1,13 +1,8 @@
-from legged_gym.envs.base.legged_robot_config import (
-    LeggedRobotCfg,
-    LeggedRobotCfgGAIL
-)
 from legged_gym import LEGGED_GYM_ROOT_DIR
+from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgGAIL
 
 # 参考轨迹文件
-TRAJECTORY_FILE = (
-    f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup01.dat"
-)
+TRAJECTORY_FILE = f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup01.dat"
 # 状态维度
 NUM_STATES = 30
 
@@ -16,7 +11,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
     seed = 42
 
     class env(LeggedRobotCfg.env):
-        frame_stack = 10   # actor 网络保留 10 帧上下文
+        frame_stack = 10  # actor 网络保留 10 帧上下文
         c_frame_stack = 3  # critic 网络保留 3 帧上下文
         # commands(3)+dof_pos(12)+dof_vel(12)+
         # actions(12)+base_ang_vel(3)+gravity(3)=45
@@ -27,7 +22,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         single_num_privileged_obs = 81
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12  # 动作维度
-        num_envs = 8192   # 并行环境数量
+        num_envs = 8192  # 并行环境数量
         episode_length_s = 20  # 每个 episode 最长 20 秒（仿真时间）
         is_amp = True  # 使用 AMP 算法
         num_states = NUM_STATES  # 状态维度
@@ -129,10 +124,10 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             dof_vel_limits = -1.0
             # smooth
             dof_acc = -2.5e-7
-            dof_vel = -5.e-4
+            dof_vel = -5.0e-4
             action_rate = -0.01
             action_smoothness = -0.01
-            torques = -1.e-5
+            torques = -1.0e-5
             # regularization
             collision = -1.0
             lin_vel_z = -0.5
@@ -145,7 +140,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             tracking_lin_vel = 1e-8
             tracking_ang_vel = 1e-8
             imitation_state = 3.0  # exp(-state error)
-            stand_success = 2.0    # bonus when upright
+            stand_success = 2.0  # bonus when upright
             # foot_clearance = 0.0
 
     class commands(LeggedRobotCfg.commands):
@@ -159,10 +154,10 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         min_curriculum = -0.5
 
         class ranges:
-            lin_vel_x = [0.0, 0.5]     # min max [m/s]
-            lin_vel_y = [0.0, 0.0]     # min max [m/s]
+            lin_vel_x = [0.0, 0.5]  # min max [m/s]
+            lin_vel_y = [0.0, 0.0]  # min max [m/s]
             ang_vel_yaw = [-0.5, 0.5]  # min max [rad/s]
-            heading = [-3.14, 3.14]    # min max [rad]
+            heading = [-3.14, 3.14]  # min max [rad]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         # 摩擦系数
@@ -191,7 +186,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
 
     class normalization(LeggedRobotCfg.normalization):
         clip_observations = 100.0  # 观测值裁剪阈值
-        clip_actions = 10.0        # 动作裁剪阈值
+        clip_actions = 10.0  # 动作裁剪阈值
 
         class obs_scales(LeggedRobotCfg.normalization.obs_scales):
             lin_vel = 2.0
@@ -213,9 +208,9 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             height_measurements = 0.1
 
     class sim(LeggedRobotCfg.sim):
-        dt = 0.005    # 仿真步长 -> 200Hz
+        dt = 0.005  # 仿真步长 -> 200Hz
         substeps = 1  # 每个仿真步长内的子步数
-        up_axis = 1   # 世界坐标系的“竖直方向”: 0 is y, 1 is z
+        up_axis = 1  # 世界坐标系的“竖直方向”: 0 is y, 1 is z
 
         class physx(LeggedRobotCfg.sim.physx):
             num_threads = 10  # 物理引擎线程数
@@ -223,19 +218,21 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             num_position_iterations = 4  # 位置约束迭代次数
             num_velocity_iterations = 1  # 速度约束迭代次数
             contact_offset = 0.01  # 接触判定阈值 [m]
-            rest_offset = 0.0   # 接触保持间隙 [m]
+            rest_offset = 0.0  # 接触保持间隙 [m]
             bounce_threshold_velocity = 0.1  # 弹性碰撞阈值 [m/s]
             max_depenetration_velocity = 1.0  # 最大渗透修正速度 [m/s]
             max_gpu_contact_pairs = 2**24  # GPU 上能同时处理的最大接触对数
             default_buffer_size_multiplier = 5  # GPU 内存缓冲区大小倍增因子
-            contact_collection = 2  # 接触点收集: 0 is 不收集, 1 is 最后一个子步, 2 is 所有子步
+            contact_collection = (
+                2  # 接触点收集: 0 is 不收集, 1 is 最后一个子步, 2 is 所有子步
+            )
 
 
 class HumanoidRobotCfgGAIL(LeggedRobotCfgGAIL):
 
     class runner(LeggedRobotCfgGAIL.runner):
-        experiment_name = 'humanoid_amp'  # 实验名称
-        run_name = '24'  # 运行名称
+        experiment_name = "humanoid_amp"  # 实验名称
+        run_name = "24"  # 运行名称
         num_steps_per_env = 24  # 策略更新频率: 每个环境每次 rollout 的步数
         max_iterations = 20000  # 策略迭代最大次数
         num_state = NUM_STATES  # 状态维度
@@ -253,7 +250,7 @@ class HumanoidRobotCfgGAIL(LeggedRobotCfgGAIL):
         init_noise_std = 1.0  # 策略网络输出动作的初始噪声标准差
         actor_hidden_dims = [512, 256, 128]
         critic_hidden_dims = [512, 256, 128]
-        activation = 'elu'  # elu, relu, selu, crelu, lrelu, tanh, sigmoid
+        activation = "elu"  # elu, relu, selu, crelu, lrelu, tanh, sigmoid
 
     class discriminator:
         init_noise_std = 1.0  # 判别器网络输出动作的初始噪声标准差
