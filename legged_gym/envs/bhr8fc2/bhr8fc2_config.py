@@ -7,7 +7,7 @@ TRAJECTORY_FILE = f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup0
 NUM_STATES = 30
 
 
-class HumanoidRobotCfg(LeggedRobotCfg):
+class Bhr8Fc2RobotCfg(LeggedRobotCfg):
     seed = 42
 
     class env(LeggedRobotCfg.env):
@@ -91,7 +91,7 @@ class HumanoidRobotCfg(LeggedRobotCfg):
         decimation = 4
 
     class asset(LeggedRobotCfg.asset):
-        file = "{LEGGED_GYM_ROOT_DIR}/resources/robots/hhfc_sf/urdf/hhfc.urdf"
+        file = f"{LEGGED_GYM_ROOT_DIR}/resources/robots/hhfc_sf/urdf/hhfc.urdf"
         name = "hhfc"
         foot_name = "ankle_r"
         knee_name = "knee"
@@ -228,10 +228,10 @@ class HumanoidRobotCfg(LeggedRobotCfg):
             )
 
 
-class HumanoidRobotCfgGAIL(LeggedRobotCfgGAIL):
+class Bhr8Fc2RobotCfgGAIL(LeggedRobotCfgGAIL):
 
     class runner(LeggedRobotCfgGAIL.runner):
-        experiment_name = "humanoid_amp"  # 实验名称
+        experiment_name = "bhr8fc2_amp"  # 实验名称
         run_name = "24"  # 运行名称
         num_steps_per_env = 24  # 策略更新频率: 每个环境每次 rollout 的步数
         max_iterations = 20000  # 策略迭代最大次数

@@ -35,9 +35,13 @@ from legged_gym.utils.task_registry import task_registry
 
 from .base.legged_robot import LeggedRobot
 from .base.legged_robot_config import LeggedRobotCfg
-from .humanoid.humanoid import HumanoidRobot
-from .humanoid.humanoid_config import HumanoidRobotCfg, HumanoidRobotCfgGAIL
+from .bhr8fc2.bhr8fc2 import Bhr8Fc2Robot
+from .bhr8fc2.bhr8fc2_config import Bhr8Fc2RobotCfg, Bhr8Fc2RobotCfgGAIL
+from .hhfc.hhfc import HhfcRobot
+from .hhfc.hhfc_config import HhfcRobotCfg, HhfcRobotCfgGAIL
+
+task_registry.register("hhfc", HhfcRobot, HhfcRobotCfg(), HhfcRobotCfgGAIL())
 
 task_registry.register(
-    "humanoid", HumanoidRobot, HumanoidRobotCfg(), HumanoidRobotCfgGAIL()
+    "bhr8fc2", Bhr8Fc2Robot, Bhr8Fc2RobotCfg(), Bhr8Fc2RobotCfgGAIL()
 )

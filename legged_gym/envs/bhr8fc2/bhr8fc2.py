@@ -5,7 +5,7 @@ from isaacgym import gymtorch
 from isaacgym.torch_utils import *
 
 from legged_gym.envs.base.legged_robot import LeggedRobot
-from legged_gym.envs.humanoid.humanoid_config import HumanoidRobotCfg
+from legged_gym.envs.bhr8fc2.bhr8fc2_config import Bhr8Fc2RobotCfg
 from legged_gym.utils.math import wrap_to_pi
 
 
@@ -35,7 +35,7 @@ def quat_to_euler_xyz(quat: torch.Tensor):
     return roll, pitch, yaw
 
 
-class HumanoidRobot(LeggedRobot):
+class Bhr8Fc2Robot(LeggedRobot):
 
     def test_ref_data(self):
         self.ref_step_counter_state = 0
