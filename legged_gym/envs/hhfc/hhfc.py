@@ -774,6 +774,15 @@ class HhfcRobot(LeggedRobot):
 
     # ---------------- Imitation Rewards -----------------
     def _build_current_state_30(self):
+        """构建当前机器人的30维状态向量
+
+        Returns:
+            torch.Tensor: shape=[num_envs, 30]
+                - 基座欧拉角 (3): roll, pitch, yaw
+                - 基座角速度 (3): 世界坐标系下的角速度
+                - 关节位置 (12): 12个关节的当前角度
+                - 关节速度 (12): 12个关节的当前角速度
+        """
         roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
         base_euler = torch.stack((roll, pitch, yaw), dim=-1)
         return torch.cat(
@@ -781,33 +790,64 @@ class HhfcRobot(LeggedRobot):
         )
 
     def _get_ref_state(self):
-        # lazy build reference tensor (expects 30 columns: euler(3), ang vel(3), qpos(12), qvel(12))
+        """从参考轨迹文件中获取当前时间步对应的专家状态
+
+        使用懒加载机制，首次调用时从文件读取并转换为GPU张量。
+        根据每个环境的episode进度，返回对应时刻的参考状态。
+
+        Returns:
+            torch.Tensor: shape=[num_envs, 30]，每个环境在其当前进度对应的专家状态
+                如果episode超过轨迹长度，则返回最后一帧的状态
+        """
+        # 懒加载：仅在第一次调用时加载参考轨迹
         if not hasattr(self, "ref_state_tensor"):
-            ref_np = self.ref_df_data  # already numpy array
+            ref_np = self.ref_df_data  # 从文件读取的numpy数组
+            # 验证轨迹文件列数是否满足要求
             if ref_np.shape[1] >= self.cfg.env.num_states:
-                ref_np = ref_np[:, : self.cfg.env.num_states]
+                ref_np = ref_np[:, : self.cfg.env.num_states]  # 取前30列
             else:
                 raise ValueError(
                     f"Reference trajectory columns {ref_np.shape[1]} < expected {self.cfg.env.num_states}"
                 )
+            # 转换为GPU张量以加速计算
             self.ref_state_tensor = torch.tensor(
                 ref_np, dtype=torch.float, device=self.device
             )
-            self.ref_state_len = self.ref_state_tensor.shape[0]
-        # index by (episode step) capped at last frame
+            self.ref_state_len = self.ref_state_tensor.shape[0]  # 记录轨迹总帧数
+        # 根据当前episode进度索引对应帧，防止越界
         idx = torch.clamp(self.episode_length_buf, max=self.ref_state_len - 1)
         return self.ref_state_tensor[idx]
 
     def _reward_imitation_state(self):
-        cur = self._build_current_state_30()
-        ref = self._get_ref_state()
-        err = torch.sum((cur - ref) ** 2, dim=-1) / cur.shape[-1]
-        # sharper penalty for large deviation
+        """计算状态模仿奖励
+
+        对比机器人当前状态与参考轨迹中对应时刻的专家状态，
+        计算均方误差并转换为指数形式的奖励信号。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，范围 (0, 1]
+                状态越接近专家演示，奖励越高（接近1）
+                状态偏差越大，奖励越低（接近0）
+        """
+        cur = self._build_current_state_30()  # 机器人当前30维状态
+        ref = self._get_ref_state()  # 参考轨迹对应时刻的30维状态
+        err = torch.sum((cur - ref) ** 2, dim=-1) / cur.shape[-1]  # 归一化的均方误差
+        # 使用指数函数放大惩罚：误差越大，奖励衰减越快
         return torch.exp(-10.0 * err)
 
     def _reward_stand_success(self):
-        # success if height high and orientation upright
+        """判断机器人是否成功站立
+
+        通过检查基座高度和姿态角度，判断机器人是否达到直立站立状态。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，值为0或1
+                1.0: 成功站立（高度>0.85m 且 姿态接近竖直）
+                0.0: 未站立
+        """
+        # 获取姿态角度
         roll, pitch, _ = quat_to_euler_xyz(self.base_quat)
-        height = self.root_states[:, 2]
+        height = self.root_states[:, 2]  # 基座高度（z坐标）
+        # 判断条件：高度足够高 且 roll和pitch角度接近0（±0.25弧度 ≈ ±14度）
         upright = (height > 0.85) & (torch.abs(roll) < 0.25) & (torch.abs(pitch) < 0.25)
-        return upright.float()
+        return upright.float()  # 转换为浮点数奖励
