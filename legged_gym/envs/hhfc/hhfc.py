@@ -38,22 +38,56 @@ def quat_to_euler_xyz(quat: torch.Tensor):
 class HhfcRobot(LeggedRobot):
 
     def test_ref_data(self):
-        self.ref_step_counter_state = 0
-        # determine reference data according to num_states
-        if self.cfg.env.num_states == 31:  # contains quaternion, base angular velocity
-            ref_base_orientation = torch.tensor(self.ref_df_data[:, 0:4]).cuda()
-            ref_base_ang_vel = torch.tensor(self.ref_df_data[:, 4:7]).cuda()
-            ref_dof_pos = torch.tensor(self.ref_df_data[:, 7:19]).cuda()
-            ref_dof_vel = torch.tensor(self.ref_df_data[:, 19:31]).cuda()
-        elif self.cfg.env.num_states == 27:  # contains base angular velocity
+        """测试参考轨迹数据的可视化播放函数
+
+        该函数用于在Isaac Gym仿真器中逐帧播放参考轨迹数据,
+        将专家演示动作在仿真环境中重现,用于验证轨迹数据的正确性和完整性。
+
+        功能流程:
+        1. 根据 num_states 配置解析参考轨迹文件的列布局
+        2. 提取基座姿态、角速度、关节位置、关节速度等状态
+        3. 在无限循环中逐帧设置机器人状态并渲染
+        4. 播放完成后自动循环重播
+
+        支持的状态维度:
+        - 31维: 完整状态 (四元数4 + 角速度3 + 关节位置12 + 关节速度12)
+        - 27维: 排除四元数 (角速度3 + 关节位置12 + 关节速度12)
+        - 24维: 仅关节状态 (关节位置12 + 关节速度12)
+        - 20维: 排除髋关节frontal自由度 (10关节位置 + 10关节速度)
+        - 16维: 排除髋关节frontal和transversal (8关节位置 + 8关节速度)
+
+        注意: 该函数会进入无限循环,需手动终止程序退出
+        """
+        self.ref_step_counter_state = 0  # 初始化帧计数器
+
+        # 根据配置的状态维度,解析参考轨迹文件的数据列布局
+        if self.cfg.env.num_states == 31:  # 31维: 包含四元数和基座角速度
+            # 轨迹布局: [quat(4) | ang_vel(3) | dof_pos(12) | dof_vel(12)]
+            ref_base_orientation = torch.tensor(
+                self.ref_df_data[:, 0:4]
+            ).cuda()  # 基座四元数(x,y,z,w)
+            ref_base_ang_vel = torch.tensor(
+                self.ref_df_data[:, 4:7]
+            ).cuda()  # 基座角速度(roll,pitch,yaw rate)
+            ref_dof_pos = torch.tensor(self.ref_df_data[:, 7:19]).cuda()  # 12个关节角度
+            ref_dof_vel = torch.tensor(
+                self.ref_df_data[:, 19:31]
+            ).cuda()  # 12个关节角速度
+
+        elif self.cfg.env.num_states == 27:  # 27维: 包含角速度但不含四元数
+            # 轨迹布局: [ang_vel(3) | dof_pos(12) | dof_vel(12)]
+            # 四元数缺失,初始化为单位四元数(表示无旋转)
             ref_base_orientation = torch.zeros(
                 (self.ref_df_data.shape[0], 4), dtype=torch.float
             ).cuda()
-            ref_base_orientation[:, 3] = 1.0  # set w component to 1.0
+            ref_base_orientation[:, 3] = 1.0  # 设置w分量为1.0,表示单位四元数
             ref_base_ang_vel = torch.tensor(self.ref_df_data[:, 0:3]).cuda()
             ref_dof_pos = torch.tensor(self.ref_df_data[:, 3:15]).cuda()
             ref_dof_vel = torch.tensor(self.ref_df_data[:, 15:27]).cuda()
-        elif self.cfg.env.num_states == 24:  # only include dof_pos and dof_vel
+
+        elif self.cfg.env.num_states == 24:  # 24维: 仅包含关节位置和速度
+            # 轨迹布局: [dof_pos(12) | dof_vel(12)]
+            # 基座姿态和角速度缺失,初始化为零(静止直立姿态)
             ref_base_orientation = torch.zeros(
                 (self.ref_df_data.shape[0], 4), dtype=torch.float
             ).cuda()
@@ -63,7 +97,10 @@ class HhfcRobot(LeggedRobot):
             ).cuda()
             ref_dof_pos = torch.tensor(self.ref_df_data[:, 0:12]).cuda()
             ref_dof_vel = torch.tensor(self.ref_df_data[:, 12:24]).cuda()
-        elif self.cfg.env.num_states == 20:  # exclude hip frontal
+
+        elif self.cfg.env.num_states == 20:  # 20维: 排除髋关节frontal自由度(索引1和7)
+            # 轨迹布局: [dof_pos(10, excluding indices 1,7) | dof_vel(10, excluding indices 1,7)]
+            # 排除的关节使用默认位置,速度设为0
             ref_base_orientation = torch.zeros(
                 (self.ref_df_data.shape[0], 4), dtype=torch.float
             ).cuda()
@@ -71,9 +108,11 @@ class HhfcRobot(LeggedRobot):
             ref_base_ang_vel = torch.zeros(
                 (self.ref_df_data.shape[0], 3), dtype=torch.float
             ).cuda()
+            # 初始化12维关节位置向量,排除的关节保持为0
             ref_dof_pos = torch.zeros(
                 (self.ref_df_data.shape[0], 12), dtype=torch.float
             ).cuda()
+            # 将轨迹中的10个关节数据填入对应索引(排除索引1和7)
             ref_dof_pos[:, [0, 2, 3, 4, 5, 6, 8, 9, 10, 11]] = torch.tensor(
                 self.ref_df_data[:, 0:10]
             ).cuda()
@@ -83,7 +122,12 @@ class HhfcRobot(LeggedRobot):
             ref_dof_vel[:, [0, 2, 3, 4, 5, 6, 8, 9, 10, 11]] = torch.tensor(
                 self.ref_df_data[:, 12:22]
             ).cuda()
-        elif self.cfg.env.num_states == 16:  # exclude hip frontal and hip transversal
+
+        elif (
+            self.cfg.env.num_states == 16
+        ):  # 16维: 排除髋关节frontal(索引1,7)和transversal(索引2,8)
+            # 轨迹布局: [dof_pos(8, excluding indices 1,2,7,8) | dof_vel(8, excluding indices 1,2,7,8)]
+            # 排除更多髋关节自由度,仅保留8个主要关节
             ref_base_orientation = torch.zeros(
                 (self.ref_df_data.shape[0], 4), dtype=torch.float
             ).cuda()
@@ -94,6 +138,7 @@ class HhfcRobot(LeggedRobot):
             ref_dof_pos = torch.zeros(
                 (self.ref_df_data.shape[0], 12), dtype=torch.float
             ).cuda()
+            # 将轨迹中的8个关节数据填入对应索引(排除索引1,2,7,8)
             ref_dof_pos[:, [0, 3, 4, 5, 6, 9, 10, 11]] = torch.tensor(
                 self.ref_df_data[:, 0:8]
             ).cuda()
@@ -104,44 +149,63 @@ class HhfcRobot(LeggedRobot):
                 self.ref_df_data[:, 8:16]
             ).cuda()
         else:
+            # 不支持的状态维度配置,抛出异常
             raise ValueError("Invalid number of states")
 
+        # 无限循环播放轨迹数据,用于可视化验证
         while True:
-            self.render()
+            self.render()  # 更新仿真器画面显示
+
+            # 步骤1: 设置当前帧的关节状态
+            # 从轨迹数据中提取当前帧的关节位置和速度,并reshape为正确维度
             self.dof_pos[:] = ref_dof_pos[self.ref_step_counter_state, :].view(
                 -1, self.num_dof
-            )
+            )  # 关节位置: [num_envs, 12]
             self.dof_vel[:] = ref_dof_vel[self.ref_step_counter_state, :].view(
                 -1, self.num_dof
-            )
-            self.root_states[:] = self.base_init_state
-            self.root_states[:, :3] += self.env_origins[:]
+            )  # 关节速度: [num_envs, 12]
+
+            # 步骤2: 设置当前帧的基座状态
+            self.root_states[:] = self.base_init_state  # 先重置为初始基座状态
+            self.root_states[:, :3] += self.env_origins[
+                :
+            ]  # 加上环境原点偏移(多环境并行)
+            # 设置基座姿态(四元数): root_states[:, 3:7] = [x, y, z, w]
             self.root_states[:, 3:7] = ref_base_orientation[
                 self.ref_step_counter_state, :
             ].view(-1, 4)
+            # 设置基座角速度: root_states[:, 10:13] = [roll_rate, pitch_rate, yaw_rate]
             self.root_states[:, 10:13] = ref_base_ang_vel[
                 self.ref_step_counter_state, :
             ].view(-1, 3)
+
+            # 步骤3: 将状态应用到仿真器
+            # 获取所有环境的索引(用于批量更新)
             env_ids_int32 = torch.arange(self.num_envs, device=self.device).to(
                 dtype=torch.int32
             )
+            # 更新关节状态(位置和速度)到仿真器
             self.gym.set_dof_state_tensor_indexed(
                 self.sim,
                 gymtorch.unwrap_tensor(self.dof_state),
                 gymtorch.unwrap_tensor(env_ids_int32),
                 len(env_ids_int32),
             )
+            # 更新基座状态(位置、姿态、速度)到仿真器
             self.gym.set_actor_root_state_tensor_indexed(
                 self.sim,
                 gymtorch.unwrap_tensor(self.root_states),
                 gymtorch.unwrap_tensor(env_ids_int32),
                 len(env_ids_int32),
             )
-            # for testing state
+
+            # 步骤4: 执行一步仿真(用于测试状态是否合理)
             self.gym.simulate(self.sim)
+
+            # 步骤5: 递增帧计数器,并在到达轨迹末尾时循环重播
             self.ref_step_counter_state += 1
             if self.ref_step_counter_state > self.ref_step_max:
-                self.ref_step_counter_state = 0
+                self.ref_step_counter_state = 0  # 重置计数器,从头播放
 
     def step(self, actions):
         if self.cfg.domain_rand.randomize_ctrl_delay:
