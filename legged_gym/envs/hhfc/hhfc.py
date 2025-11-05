@@ -208,56 +208,87 @@ class HhfcRobot(LeggedRobot):
                 self.ref_step_counter_state = 0  # 重置计数器,从头播放
 
     def step(self, actions):
+        """执行一步仿真,应用动作并更新环境状态
+
+        如果启用了控制延迟随机化,则模拟真实机器人系统中的通信延迟。
+
+        Args:
+            actions: 来自策略网络的动作指令 [num_envs, num_actions]
+
+        Returns:
+            返回父类step()的结果,包含观测、奖励、终止标志等
+        """
+        # 控制延迟模拟:真实机器人系统存在传感器到执行器的延迟
         if self.cfg.domain_rand.randomize_ctrl_delay:
+            # 队列右移:旧动作向后移动一位 (实现FIFO队列)
             self.action_queue[:, 1:] = self.action_queue[:, :-1].clone()
+            # 新动作存入队列头部
             self.action_queue[:, 0] = actions.clone()
+            # 从队列中取出延迟后的动作 (每个环境的延迟步数可能不同)
             actions = self.action_queue[
                 torch.arange(self.num_envs), self.action_delay
             ].clone()
-        return super().step(actions)
+        return super().step(actions)  # 调用父类的step方法执行仿真
 
     def compute_observations(self):
-        """Computes observations"""
+        """计算观测值和特权观测值
+
+        构建两种观测:
+        1. obs_buf: 策略网络的输入观测 (部分可观测状态)
+        2. privileged_obs_buf: Critic网络的输入 (包含真实环境参数的完整状态)
+
+        观测包含历史帧堆叠,用于捕捉时序信息。
+        """
+        # ========== 构建单帧策略观测 (45维) ==========
         obs_buf = torch.cat(
             (
-                self.commands[:, :3] * self.commands_scale,  # 3
-                (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,  # 12
-                self.dof_vel * self.obs_scales.dof_vel,  # 12
-                self.actions,  # 12
-                self.base_ang_vel * self.obs_scales.ang_vel,  # 3
-                self.projected_gravity,  # 3
+                self.commands[:, :3]
+                * self.commands_scale,  # 3维: 速度命令 (vx, vy, vyaw)
+                (self.dof_pos - self.default_dof_pos)
+                * self.obs_scales.dof_pos,  # 12维: 关节位置偏差
+                self.dof_vel * self.obs_scales.dof_vel,  # 12维: 关节速度
+                self.actions,  # 12维: 上一步执行的动作
+                self.base_ang_vel * self.obs_scales.ang_vel,  # 3维: 基座角速度
+                self.projected_gravity,  # 3维: 重力方向在body坐标系的投影
             ),
             dim=-1,
         )
+
+        # 控制延迟信息 (如果启用,但当前未加入obs_buf)
         if self.cfg.domain_rand.randomize_ctrl_delay:
             ctrl_delay = (
                 self.action_delay / self.cfg.domain_rand.ctrl_delay_step_range[1]
             ).view(
                 -1, 1
-            )  # normalize ctrl delay to [0, 1]
-        # privileged obs add base height (z) -> expected 81 dims per config
+            )  # 归一化控制延迟到 [0, 1]
+
+        # ========== 构建单帧特权观测 (81维) ==========
+        # 包含真实物理参数,仅在训练Critic时使用,部署时不可用
         self.privileged_obs_buf = torch.cat(
             (
-                self.base_lin_vel * self.obs_scales.lin_vel,  # 3
-                self.base_ang_vel * self.obs_scales.ang_vel,  # 3
-                self.projected_gravity,  # 3
-                self.commands[:, :3] * self.commands_scale,  # 3
-                (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,  # 12
-                self.dof_vel * self.obs_scales.dof_vel,  # 12
-                self.actions,  # 12
-                self.rand_push_force[:, :2],  # 2
-                self.env_frictions,  # 1
-                self.base_mass / 30.0,  # 1
-                self.com_displacements,  # 3
-                self._kp_scale,  # 12
-                self._kd_scale,  # 12
-                self.joint_armature.unsqueeze(1),  # 1
-                self.root_states[:, 2].unsqueeze(1),  # 1 base height
+                self.base_lin_vel * self.obs_scales.lin_vel,  # 3维: 基座线速度 (真实值)
+                self.base_ang_vel * self.obs_scales.ang_vel,  # 3维: 基座角速度
+                self.projected_gravity,  # 3维: 重力投影
+                self.commands[:, :3] * self.commands_scale,  # 3维: 速度命令
+                (self.dof_pos - self.default_dof_pos)
+                * self.obs_scales.dof_pos,  # 12维: 关节位置偏差
+                self.dof_vel * self.obs_scales.dof_vel,  # 12维: 关节速度
+                self.actions,  # 12维: 上一步动作
+                self.rand_push_force[:, :2],  # 2维: 随机外力扰动 (xy方向)
+                self.env_frictions,  # 1维: 地面摩擦系数
+                self.base_mass / 30.0,  # 1维: 归一化的机器人质量
+                self.com_displacements,  # 3维: 质心偏移
+                self._kp_scale,  # 12维: PD控制器比例增益缩放
+                self._kd_scale,  # 12维: PD控制器微分增益缩放
+                self.joint_armature.unsqueeze(1),  # 1维: 关节转动惯量
+                self.root_states[:, 2].unsqueeze(1),  # 1维: 基座高度 (z坐标)
             ),
             dim=-1,
         )
-        # add perceptive inputs if not blind
+
+        # ========== 添加地形高度信息 (如果启用) ==========
         if self.cfg.terrain.measure_heights:
+            # 计算脚下地形相对高度,裁剪到[-1, 1]范围
             heights = (
                 torch.clip(
                     self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights,
@@ -267,75 +298,124 @@ class HhfcRobot(LeggedRobot):
                 * self.obs_scales.height_measurements
             )
             obs_buf = torch.cat((obs_buf, heights), dim=-1)
-        # add noise if needed
+
+        # ========== 添加观测噪声 (模拟传感器误差) ==========
         if self.add_noise:
             obs_now = obs_buf.clone()
+            # 添加均匀分布噪声: U(-1, 1) * noise_scale
             obs_now += (2 * torch.rand_like(obs_now) - 1) * self.noise_scale_vec
         else:
             obs_now = obs_buf.clone()
 
-        # obs_history
+        # ========== 观测历史帧堆叠 ==========
+        # 将当前帧加入历史队列 (自动弹出最老的帧)
         self.obs_history.append(obs_now)
         self.critic_history.append(self.privileged_obs_buf)
+
+        # 拼接历史帧: [num_envs, num_single_obs * frame_stack]
         self.obs_buf = torch.cat(
             [self.obs_history[i] for i in range(self.obs_history.maxlen)], dim=-1
         )
+        # Critic观测也进行帧堆叠: [num_envs, single_num_privileged_obs * c_frame_stack]
         self.privileged_obs_buf = torch.cat(
             [self.critic_history[i] for i in range(self.critic_history.maxlen)], dim=-1
         )
 
     def compute_policy_state(self):
-        """Computes policy_state for discriminator"""
-        # 30-dim: base_euler(3) + base_ang_vel(3) + dof_pos(12) + dof_vel(12)
+        """计算用于判别器(Discriminator)的策略状态
+
+        在AMP/GAIL算法中,判别器需要区分真实专家轨迹和策略生成的轨迹。
+        这里构建30维状态向量,与参考轨迹的格式保持一致。
+
+        状态组成 (30维):
+        - 基座欧拉角 (3): roll, pitch, yaw (从四元数转换)
+        - 基座角速度 (3): 世界坐标系下的角速度
+        - 关节位置 (12): 12个关节的当前角度
+        - 关节速度 (12): 12个关节的当前角速度
+
+        结果存储在 self.state_buf 中,供判别器使用。
+        """
+        # 将四元数转换为欧拉角 (更直观,且与参考轨迹格式一致)
         roll, pitch, yaw = quat_to_euler_xyz(self.base_quat)
-        base_euler = torch.stack((roll, pitch, yaw), dim=-1)
+        base_euler = torch.stack((roll, pitch, yaw), dim=-1)  # [num_envs, 3]
+
+        # 拼接完整的30维状态向量
         self.state_buf = torch.cat(
             (base_euler, self.base_ang_vel, self.dof_pos, self.dof_vel), dim=-1
-        )
+        )  # [num_envs, 30]
 
     def post_physics_step(self):
-        """check terminations, compute observations and rewards
-        calls self._post_physics_step_callback() for common computations
-        calls self._draw_debug_vis() if needed
+        """物理仿真步后的处理流程
+
+        每次物理引擎执行一步后调用此函数,完成以下任务:
+        1. 刷新仿真状态 (从GPU获取最新的物理状态)
+        2. 更新计数器和派生量
+        3. 检查终止条件和计算奖励
+        4. 重置需要重置的环境
+        5. 计算新观测
+        6. 更新历史动作记录
+        7. 可视化调试信息 (如果启用)
         """
-        self.gym.refresh_actor_root_state_tensor(self.sim)
-        self.gym.refresh_net_contact_force_tensor(self.sim)
-        self.gym.refresh_rigid_body_state_tensor(self.sim)  # Periodic Reward Framework
+        # ========== 步骤1: 从仿真器刷新最新状态 ==========
+        self.gym.refresh_actor_root_state_tensor(
+            self.sim
+        )  # 刷新基座状态(位置、姿态、速度)
+        self.gym.refresh_net_contact_force_tensor(self.sim)  # 刷新接触力
+        self.gym.refresh_rigid_body_state_tensor(
+            self.sim
+        )  # 刷新所有刚体状态 (用于脚部位置和速度)
 
-        self.episode_length_buf += 1
-        self.common_step_counter += 1
+        # ========== 步骤2: 更新计数器 ==========
+        self.episode_length_buf += 1  # 每个环境的episode长度+1
+        self.common_step_counter += 1  # 全局步数计数器+1
 
-        # prepare quantities
+        # ========== 步骤3: 更新派生状态量 ==========
+        # 提取基座姿态四元数
         self.base_quat[:] = self.root_states[:, 3:7]
+
+        # 将世界坐标系速度转换到机器人body坐标系
         self.base_lin_vel[:] = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 7:10]
-        )
+        )  # 线速度: 世界系 -> body系
         self.base_ang_vel[:] = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 10:13]
-        )
+        )  # 角速度: 世界系 -> body系
+
+        # 计算重力在body坐标系的投影 (用于姿态感知)
         self.projected_gravity[:] = quat_rotate_inverse(
             self.base_quat, self.gravity_vec
         )
+
+        # 刷新脚部状态 (位置和速度)
         self._refresh_rigid_body_states()
 
+        # ========== 步骤4: 执行通用回调 (命令重采样、地形高度测量、外力扰动等) ==========
         self._post_physics_step_callback()
 
-        # compute observations, rewards, resets, ...
-        self.check_termination()
-        self.compute_reward()
+        # ========== 步骤5: 计算终止条件和奖励 ==========
+        self.check_termination()  # 检查哪些环境应该终止 (摔倒、超时等)
+        self.compute_reward()  # 计算所有奖励项
 
-        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
-        self.reset_idx(env_ids)
-        # in some cases a simulation step might be required to refresh some obs (for example body positions)
+        # ========== 步骤6: 重置终止的环境 ==========
+        env_ids = self.reset_buf.nonzero(
+            as_tuple=False
+        ).flatten()  # 获取需要重置的环境ID
+        self.reset_idx(env_ids)  # 重置这些环境的状态
+
+        # ========== 步骤7: 计算新观测 ==========
+        # 注意: 某些情况下需要再执行一步仿真来刷新观测 (例如刚体位置)
         self.compute_observations()
 
-        self.llast_actions[:] = self.last_actions[:]
-        self.last_actions[:] = self.actions[:]
-        self.last_dof_vel[:] = self.dof_vel[:]
-        self.last_root_vel[:] = self.root_states[:, 7:13]
+        # ========== 步骤8: 更新动作历史记录 ==========
+        # 用于计算动作平滑度奖励 (需要二阶导数)
+        self.llast_actions[:] = self.last_actions[:]  # t-2时刻的动作
+        self.last_actions[:] = self.actions[:]  # t-1时刻的动作
+        self.last_dof_vel[:] = self.dof_vel[:]  # 上一时刻的关节速度
+        self.last_root_vel[:] = self.root_states[:, 7:13]  # 上一时刻的基座速度
 
+        # ========== 步骤9: 可视化调试信息 (如果启用) ==========
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
-            self._draw_debug_vis()
+            self._draw_debug_vis()  # 绘制调试可视化 (奖励曲线、力矢量等)
 
     def _reset_dofs(self, env_ids):
         """Resets DOF position and velocities of selected environmments
