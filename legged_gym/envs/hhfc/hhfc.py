@@ -683,40 +683,63 @@ class HhfcRobot(LeggedRobot):
     # ================================================ Private Functions ================================================== #
 
     def _reward_foot_landing_vel(self):
-        z_vels = self.foot_vel[:, :, 2]
-        contacts = self.contact_forces[:, self.feet_indices, 2] > 0.1
+        """惩罚脚部着地时的垂直速度
+
+        在脚即将着地时检测其垂直速度，速度越大惩罚越大。
+        目的是鼓励机器人轻柔着地，避免冲击过大。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，着地速度的平方和（负奖励）
+        """
+        z_vels = self.foot_vel[:, :, 2]  # 脚部在z方向的速度
+        contacts = (
+            self.contact_forces[:, self.feet_indices, 2] > 0.1
+        )  # 判断是否已接触地面
+        # 判断"即将着地"状态：脚高度低于阈值 且 未接触 且 向下运动
         about_to_land = (
             (self.foot_pos[:, :, 2] < self.cfg.rewards.about_landing_threshold)
             & (~contacts)
             & (z_vels < 0.0)
         )
+        # 提取即将着地时的速度，其他时刻为0
         landing_z_vels = torch.where(about_to_land, z_vels, torch.zeros_like(z_vels))
-        reward = torch.sum(torch.square(landing_z_vels), dim=1)
+        reward = torch.sum(torch.square(landing_z_vels), dim=1)  # 速度平方和
         return reward
 
     def _reward_feet_distance(self):
+        """奖励合理的双脚间距
+
+        鼓励双脚保持在合理范围内：既不能太近（避免碰撞），也不能太远（保持稳定）。
+        使用双指数函数，在min_dist和max_dist附近给予高奖励。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，范围 [0, 1]，最优间距时接近1
         """
-        Calculates the reward based on the distance between the feet. Penalize feet get close to each other or too far away.
-        """
-        foot_pos = self.rigid_body_states[:, self.feet_indices, :2]
-        foot_dist = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=1)
-        # print(f"foot_dist: {foot_dist}")
-        fd = self.cfg.rewards.min_dist
-        max_df = self.cfg.rewards.max_dist
-        d_min = torch.clamp(foot_dist - fd, -0.5, 0.0)
-        d_max = torch.clamp(foot_dist - max_df, 0, 0.5)
+        foot_pos = self.rigid_body_states[:, self.feet_indices, :2]  # 双脚xy平面位置
+        foot_dist = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=1)  # 双脚距离
+        fd = self.cfg.rewards.min_dist  # 最小允许距离（0.25m）
+        max_df = self.cfg.rewards.max_dist  # 最大允许距离（0.6m）
+        # 计算偏离合理范围的程度
+        d_min = torch.clamp(foot_dist - fd, -0.5, 0.0)  # 低于最小距离的偏差
+        d_max = torch.clamp(foot_dist - max_df, 0, 0.5)  # 超过最大距离的偏差
+        # 两个指数衰减函数的平均值：在合理范围内奖励高
         return (
             torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)
         ) / 2
 
     def _reward_knee_distance(self):
+        """奖励合理的双膝间距
+
+        类似双脚间距奖励，鼓励双膝保持适当距离。
+        最大距离设为双脚最大距离的一半，因为膝关节活动范围较小。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，范围 [0, 1]，最优间距时接近1
         """
-        Calculates the reward based on the distance between the knee of the humanoid.
-        """
-        knee_pos = self.rigid_body_states[:, self.knee_indices, :2]
-        knee_dist = torch.norm(knee_pos[:, 0, :] - knee_pos[:, 1, :], dim=1)
-        fd = self.cfg.rewards.min_dist
-        max_df = self.cfg.rewards.max_dist / 2
+        knee_pos = self.rigid_body_states[:, self.knee_indices, :2]  # 双膝xy平面位置
+        knee_dist = torch.norm(knee_pos[:, 0, :] - knee_pos[:, 1, :], dim=1)  # 双膝距离
+        fd = self.cfg.rewards.min_dist  # 最小允许距离
+        max_df = self.cfg.rewards.max_dist / 2  # 最大距离为双脚的一半
         d_min = torch.clamp(knee_dist - fd, -0.5, 0.0)
         d_max = torch.clamp(knee_dist - max_df, 0, 0.5)
         return (
@@ -724,22 +747,40 @@ class HhfcRobot(LeggedRobot):
         ) / 2
 
     def _reward_foot_clearance(self):
-        """reward for foot clearance"""
-        foot_vel_xy_norm = torch.norm(self.foot_vel[:, :, [0, 1]], dim=-1)
+        """奖励摆动腿的离地高度
+
+        在脚部快速移动（摆动相）时，鼓励脚离地一定高度，避免拖地。
+        使用正向表述（指数形式），偏差越小奖励越高。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，范围 (0, 1]，接近目标高度时接近1
+        """
+        foot_vel_xy_norm = torch.norm(
+            self.foot_vel[:, :, [0, 1]], dim=-1
+        )  # 脚在xy平面的速度
+        # 计算脚高度与目标的偏差，乘以移动速度（摆动时才计入）
         reward = torch.sum(
             foot_vel_xy_norm
             * torch.square(
-                self.foot_pos[:, :, 2]
-                - self.cfg.rewards.foot_clearance_target
-                - self.cfg.rewards.foot_height_offset
+                self.foot_pos[:, :, 2]  # 当前脚高度
+                - self.cfg.rewards.foot_clearance_target  # 目标离地高度（0.08m）
+                - self.cfg.rewards.foot_height_offset  # 基准偏移量（0.068m）
             ),
             dim=-1,
         )
-        # positive formulation can learn better
+        # 正向表述：偏差越小，奖励越接近1
         return torch.exp(-reward / 0.01)
 
     def _reward_action_smoothness(self):
-        """Penalize action smoothness"""
+        """惩罚动作的不平滑（抖动）
+
+        使用二阶差分（加速度）衡量动作平滑度。
+        二阶差分 = a[t] - 2*a[t-1] + a[t-2]，值越大说明动作变化越剧烈。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，动作加速度的平方和（负奖励）
+        """
+        # 计算动作的二阶差分（离散加速度）
         action_smoothness_cost = torch.sum(
             torch.square(self.actions - 2 * self.last_actions + self.llast_actions),
             dim=-1,
@@ -747,6 +788,14 @@ class HhfcRobot(LeggedRobot):
         return action_smoothness_cost
 
     def _reward_dof_pos_limits(self):
+        """惩罚关节角度接近极限位置
+
+        检测关节是否过于接近其物理限位，越接近惩罚越大。
+        排除膝关节（索引3和9），因为膝关节通常需要大幅弯曲。
+
+        Returns:
+            torch.Tensor: shape=[num_envs,]，超出安全范围的总量（负奖励）
+        """
         dof_indices_excluding_knee = [
             0,
             1,
@@ -758,19 +807,22 @@ class HhfcRobot(LeggedRobot):
             8,
             10,
             11,
-        ]  # exclude knee joints
-        # Penalize dof positions too close to the limit
+        ]  # 排除膝关节（索引3和9）
+        # 计算超出下限的程度
         out_of_limits = -(
             self.dof_pos[:, dof_indices_excluding_knee]
             - self.dof_pos_limits[dof_indices_excluding_knee, 0]
         ).clip(
             max=0.0
-        )  # lower limit
+        )  # 低于下限时为正值
+        # 累加超出上限的程度
         out_of_limits += (
             self.dof_pos[:, dof_indices_excluding_knee]
             - self.dof_pos_limits[dof_indices_excluding_knee, 1]
-        ).clip(min=0.0)
-        return torch.sum(out_of_limits, dim=1)
+        ).clip(
+            min=0.0
+        )  # 高于上限时为正值
+        return torch.sum(out_of_limits, dim=1)  # 所有关节的总超限量
 
     # ---------------- Imitation Rewards -----------------
     def _build_current_state_30(self):
