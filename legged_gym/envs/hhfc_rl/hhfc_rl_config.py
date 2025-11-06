@@ -186,10 +186,12 @@ class HhfcRlRobotCfg(LeggedRobotCfg):
         friction_range = [0.2, 1.2]  # 摩擦系数随机范围
         randomize_base_mass = True  # 随机化基座质量
         added_mass_range = [-1.0, 3.0]  # 质量增量范围 [kg]
-        randomize_base_com = True  # 随机化质心位置
-        added_com_range_x = [-0.05, 0.05]  # 质心x方向偏移 [m]
-        added_com_range_y = [-0.05, 0.05]  # 质心y方向偏移 [m]
-        added_com_range_z = [-0.05, 0.05]  # 质心z方向偏移 [m]
+        randomize_com_pos = True  # 随机化质心位置
+        com_displacement_range = [
+            [-0.05, 0.05],
+            [-0.05, 0.05],
+            [-0.05, 0.05],
+        ]  # xyz方向的质心偏移 [m]
         push_robots = True  # 是否随机推动机器人 (测试稳定性)
         push_interval_s = 10  # 推动间隔 [s]
         max_push_vel_xy = 1.0  # 最大推动速度 [m/s]
