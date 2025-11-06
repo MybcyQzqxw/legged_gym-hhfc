@@ -199,7 +199,7 @@ class HhfcRlRobotCfg(LeggedRobotCfg):
         stiffness_multiplier_range = [0.8, 1.2]  # 刚度倍增系数范围
         damping_multiplier_range = [0.8, 1.2]  # 阻尼倍增系数范围
         randomize_joint_armature = True  # 随机化关节转动惯量
-        joint_armature_multiplier_range = [0.8, 1.2]  # 转动惯量倍增系数范围
+        joint_armature_range = [0.0, 0.1]  # 关节转动惯量范围 [N·m·s/rad]
 
     class normalization(LeggedRobotCfg.normalization):
         """观测归一化配置"""
