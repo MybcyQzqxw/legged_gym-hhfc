@@ -117,17 +117,25 @@ class HhfcRlRobot(LeggedRobot):
         self.obs_buf = torch.cat([tensor for tensor in self.obs_history], dim=-1)
 
         # ========== 构造特权观测(81维) ==========
+        # 参考 hhfc.py 的实现，包含完整的状态和域随机化参数
         privileged_obs = torch.cat(
             [
-                obs,  # [0:45] 包含全部策略观测
-                self.base_lin_vel * self.obs_scales.lin_vel,  # [45:48] 基座线速度
-                self.friction_coeffs[:, None],  # [48] 摩擦系数
-                self.body_mass[:, None] / 20.0,  # [49] 归一化质量
-                self.body_com,  # [50:53] 质心位置
-                self.external_forces[:, :6, :].flatten(
-                    start_dim=1
-                ),  # [53:71] 前6个刚体的外力
-                self.contact_states,  # [71:73] 双脚接触状态 (二值)
+                self.base_lin_vel * self.obs_scales.lin_vel,  # [0:3] 基座线速度
+                self.base_ang_vel * self.obs_scales.ang_vel,  # [3:6] 基座角速度
+                self.projected_gravity,  # [6:9] 重力投影
+                self.commands[:, :3] * self.commands_scale,  # [9:12] 速度命令
+                (self.dof_pos - self.default_dof_pos)
+                * self.obs_scales.dof_pos,  # [12:24] 关节位置
+                self.dof_vel * self.obs_scales.dof_vel,  # [24:36] 关节速度
+                self.actions,  # [36:48] 上一步动作
+                self.rand_push_force[:, :2],  # [48:50] 随机外力
+                self.env_frictions,  # [50:51] 摩擦系数
+                self.base_mass / 30.0,  # [51:52] 归一化质量
+                self.com_displacements,  # [52:55] 质心偏移
+                self._kp_scale,  # [55:67] PD增益Kp缩放
+                self._kd_scale,  # [67:79] PD增益Kd缩放
+                self.joint_armature.unsqueeze(1),  # [79:80] 关节转动惯量
+                self.root_states[:, 2].unsqueeze(1),  # [80:81] 基座高度
             ],
             dim=-1,
         )
@@ -170,12 +178,7 @@ class HhfcRlRobot(LeggedRobot):
         self.common_step_counter += 1
 
         # ========== 步骤3: 计算观测相关量 ==========
-        # 提取关节位置和速度
-        self.dof_pos[:] = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
-        self.dof_vel[:] = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
-
-        # 提取基座位置、姿态、速度
-        self.base_pos[:] = self.root_states[:, :3]
+        # 提取基座姿态和速度（与父类保持一致）
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(
             self.base_quat, self.root_states[:, 7:10]
