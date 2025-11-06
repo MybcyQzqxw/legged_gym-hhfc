@@ -116,6 +116,8 @@ class HhfcRlRobotCfg(LeggedRobotCfg):
         flip_visual_attachments = False  # 是否翻转视觉附件 (某些URDF需要)
         replace_cylinder_with_capsule = False  # 是否将圆柱体替换为胶囊体 (提高碰撞性能)
         fix_base_link = False  # 是否固定机身 (True则机器人悬浮,用于调试)
+        # 参考轨迹文件路径 (纯RL版本不使用,但需要提供以满足父类初始化)
+        ref_traj = f"{LEGGED_GYM_ROOT_DIR}/resources/trajectory/humanoid/standup01.dat"
 
     class rewards(LeggedRobotCfg.rewards):
         """奖励函数相关参数"""
