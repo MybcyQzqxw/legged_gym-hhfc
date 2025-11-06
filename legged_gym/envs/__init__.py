@@ -39,9 +39,13 @@ from .bhr8fc2.bhr8fc2 import Bhr8Fc2Robot
 from .bhr8fc2.bhr8fc2_config import Bhr8Fc2RobotCfg, Bhr8Fc2RobotCfgGAIL
 from .hhfc.hhfc import HhfcRobot
 from .hhfc.hhfc_config import HhfcRobotCfg, HhfcRobotCfgGAIL
+from .hhfc_rl.hhfc_rl import HhfcRlRobot
+from .hhfc_rl.hhfc_rl_config import HhfcRlRobotCfg, HhfcRlRobotCfgPPO
 
 task_registry.register("hhfc", HhfcRobot, HhfcRobotCfg(), HhfcRobotCfgGAIL())
 
 task_registry.register(
     "bhr8fc2", Bhr8Fc2Robot, Bhr8Fc2RobotCfg(), Bhr8Fc2RobotCfgGAIL()
 )
+
+task_registry.register("hhfc_rl", HhfcRlRobot, HhfcRlRobotCfg(), HhfcRlRobotCfgPPO())
