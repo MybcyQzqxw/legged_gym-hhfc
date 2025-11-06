@@ -418,44 +418,50 @@ class HhfcRobot(LeggedRobot):
             self._draw_debug_vis()  # 绘制调试可视化 (奖励曲线、力矢量等)
 
     def _reset_dofs(self, env_ids):
-        """Resets DOF position and velocities of selected environmments
-        Positions are randomly selected within 0.5:1.5 x default positions.
-        Velocities are set to zero.
+        """重置选定环境的关节状态(位置和速度)
+
+        根据配置,对不同关节施加不同范围的随机初始化,
+        以增加训练数据的多样性和策略的鲁棒性。
 
         Args:
-            env_ids (List[int]): Environemnt ids
+            env_ids (List[int]): 需要重置的环境ID列表
         """
-        # initialize dof_pos for each joint separately
+        # 根据配置决定是否对各关节分别进行随机初始化
         if self.cfg.init_state.init_joint_state_train:
+            # 创建关节位置张量
             dof_pos = torch.zeros(
                 (len(env_ids), self.num_dof), dtype=torch.float, device=self.device
-            )  # 定义关节位置变量
+            )  # 定义关节位置变量 [num_envs, 12]
+            # 为不同关节添加不同范围的随机扰动
             dof_pos[:, [0, 6]] = self.default_dof_pos[:, [0, 6]] + torch_rand_float(
                 -0.5, 0.5, (len(env_ids), 2), device=self.device
-            )  # hip_pitch
+            )  # hip_pitch (髋俯仰): ±0.5rad
             dof_pos[:, [1, 7]] = self.default_dof_pos[:, [1, 7]] + torch_rand_float(
                 -0.0, 0.0, (len(env_ids), 2), device=self.device
-            )  # hip_roll
+            )  # hip_roll (髋翻滚): 不添加扰动
             dof_pos[:, [2, 8]] = self.default_dof_pos[:, [2, 8]] + torch_rand_float(
                 -0.3, 0.3, (len(env_ids), 2), device=self.device
-            )  # hip_yaw
+            )  # hip_yaw (髋偏航): ±0.3rad
             dof_pos[:, [3, 9]] = self.default_dof_pos[:, [3, 9]] + torch_rand_float(
                 -0.6, 0.1, (len(env_ids), 2), device=self.device
-            )  # knee_pitch
+            )  # knee_pitch (膝关节): -0.6~0.1rad
             dof_pos[:, [4, 10]] = self.default_dof_pos[:, [4, 10]] + torch_rand_float(
                 -0.1, 0.3, (len(env_ids), 2), device=self.device
-            )  # ankle_pitch
+            )  # ankle_pitch (踝俯仰): -0.1~0.3rad
             dof_pos[:, [5, 11]] = self.default_dof_pos[:, [5, 11]] + torch_rand_float(
                 -0.05, 0.05, (len(env_ids), 2), device=self.device
-            )  # ankle_roll
+            )  # ankle_roll (踝翻滚): ±0.05rad
             self.dof_pos[env_ids] = dof_pos[:]
         else:
+            # 简单方式: 所有关节在默认值的0.5~1.5倍范围内随机
             self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(
                 0.5, 1.5, (len(env_ids), self.num_dof), device=self.device
             )
 
+        # 关节速度初始化为0
         self.dof_vel[env_ids] = 0.0
 
+        # 将关节状态应用到仿真器
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
@@ -465,41 +471,57 @@ class HhfcRobot(LeggedRobot):
         )
 
     def _reset_root_states(self, env_ids):
-        """Resets ROOT states position and velocities of selected environmments
-            Sets base position based on the curriculum
-            Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
+        """重置选定环境的基座状态(位置、姿态、速度)
+
+        根据课程学习和任务配置,设置基座的初始位置和姿态。
+        对于站立模仿任务,机器人从躺姿开始(pitch约-90度)。
+
         Args:
-            env_ids (List[int]): Environemnt ids
+            env_ids (List[int]): 需要重置的环境ID列表
         """
-        # base position
+        # ========== 基座位置初始化 ==========
         if self.custom_origins:
+            # 使用自定义的环境原点(用于课程学习或多地形)
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            # xy position within 1m of the center
+            # xy位置在中心±1m范围内随机 (增加起始位置多样性)
             self.root_states[env_ids, :2] += torch_rand_float(
                 -1.0, 1.0, (len(env_ids), 2), device=self.device
             )
         else:
+            # 使用默认原点
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
-        # base velocities
+
+        # ========== 基座速度初始化 ==========
+        # 随机初始速度 ±0.5 [m/s, rad/s]
         self.root_states[env_ids, 7:13] = torch_rand_float(
             -0.5, 0.5, (len(env_ids), 6), device=self.device
-        )  # [7:10]: lin vel, [10:13]: ang vel
-        # base orientation: lying start if standup imitation enabled
+        )  # [7:10]: 线速度, [10:13]: 角速度
+
+        # ========== 基座姿态初始化 ==========
         if getattr(self.cfg.env, "standup_imitation", False):
-            # Lie on back: pitch ~ -pi/2 (depending axis convention). Add small noise.
+            # 站立模仿任务: 从躺姿开始
+            # 躺在地上: pitch约-π/2 (具体取决于坐标系约定), 加小扰动
             pitch = -1.57 + torch_rand_float(
                 -0.05, 0.05, (len(env_ids), 1), device=self.device
-            ).view(-1)
+            ).view(
+                -1
+            )  # -90度 ± 2.9度
             roll = torch_rand_float(
                 -0.05, 0.05, (len(env_ids), 1), device=self.device
-            ).view(-1)
+            ).view(
+                -1
+            )  # ±2.9度
             yaw = torch_rand_float(
                 -3.14, 3.14, (len(env_ids), 1), device=self.device
-            ).view(-1)
+            ).view(
+                -1
+            )  # 随机朝向 ±180度
+            # 从欧拉角转换为四元数
             self.root_states[env_ids, 3:7] = quat_from_euler_xyz(roll, pitch, yaw)
         else:
+            # 其他任务: 从直立姿态开始,添加小扰动
             base_orien_scale = self.cfg.init_state.init_base_angle_max
             self.root_states[env_ids, 3:7] = quat_from_euler_xyz(
                 torch_rand_float(
@@ -521,6 +543,8 @@ class HhfcRobot(LeggedRobot):
                     device=self.device,
                 ).view(-1),
             )
+
+        # 将基座状态应用到仿真器
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -530,57 +554,68 @@ class HhfcRobot(LeggedRobot):
         )
 
     def _reset_dofs_gail(self, env_ids, frames):
-        """Resets DOF position and velocities of selected environmments
-        Positions are randomly selected within 0.5:1.5 x default positions.
-        Velocities are set to zero.
+        """使用GAIL/AMP方法重置关节状态(从专家轨迹初始化)
+
+        根据参考轨迹数据初始化关节位置和速度,用于GAIL/AMP算法。
+        根据num_states配置解析不同格式的轨迹数据。
 
         Args:
-            env_ids (List[int]): Environemnt ids
-            frames: expert data frames to initialize motion with
+            env_ids (List[int]): 需要重置的环境ID列表
+            frames: 专家轨迹数据帧 [num_envs, num_states]
         """
-        if self.cfg.env.num_states == 31:  # contains quaternion, base angular velocity
+        # 根据状态维度配置解析轨迹数据
+        if self.cfg.env.num_states == 31:  # 31维: 包含四元数和基座角速度
+            # 列布局: [quat(4) | ang_vel(3) | dof_pos(12) | dof_vel(12)]
             self.dof_pos[env_ids] = torch.tensor(
                 frames[:, 7:19], dtype=torch.float
-            ).cuda()
+            ).cuda()  # 关节位置从第7列开始
             self.dof_vel[env_ids] = torch.tensor(
                 frames[:, 19:31], dtype=torch.float
-            ).cuda()
-        elif self.cfg.env.num_states == 27:  # contains base angular velocity
+            ).cuda()  # 关节速度从第19列开始
+        elif self.cfg.env.num_states == 27:  # 27维: 包含基座角速度但不含四元数
+            # 列布局: [ang_vel(3) | dof_pos(12) | dof_vel(12)]
             self.dof_pos[env_ids] = torch.tensor(
                 frames[:, 3:15], dtype=torch.float
             ).cuda()
             self.dof_vel[env_ids] = torch.tensor(
                 frames[:, 15:27], dtype=torch.float
             ).cuda()
-        elif self.cfg.env.num_states == 24:  # only contains joint angles and velocities
+        elif self.cfg.env.num_states == 24:  # 24维: 仅包含关节角度和速度
+            # 列布局: [dof_pos(12) | dof_vel(12)]
             self.dof_pos[env_ids] = torch.tensor(
                 frames[:, 0:12], dtype=torch.float
             ).cuda()
             self.dof_vel[env_ids] = torch.tensor(
                 frames[:, 12:24], dtype=torch.float
             ).cuda()
-        elif self.cfg.env.num_states == 20:  # exclude hip roll
+        elif self.cfg.env.num_states == 20:  # 20维: 排除髋翻滚关节(索引1,7)
+            # 列布局: [dof_pos(10, excluding 1,7) | dof_vel(10, excluding 1,7)]
+            # 初始化完整的12关节向量
             dof_pos = torch.zeros(
                 (len(env_ids), self.num_dof), dtype=torch.float, device=self.device
             )
-            dof_pos[:, [1, 7]] = self.default_dof_pos[:, [1, 7]]
+            dof_pos[:, [1, 7]] = self.default_dof_pos[:, [1, 7]]  # 排除的关节使用默认值
+            # 填入轨迹中的10个关节数据
             dof_pos[:, [0, 2, 3, 4, 5, 6, 8, 9, 10, 11]] = torch.tensor(
                 frames[:, 0:10], dtype=torch.float
             ).cuda()
             self.dof_pos[env_ids, :] = dof_pos[:]
+
             dof_vel = torch.zeros(
                 (len(env_ids), self.num_dof), dtype=torch.float, device=self.device
             )
-            dof_vel[:, [1, 7]] = 0.0
+            dof_vel[:, [1, 7]] = 0.0  # 排除的关节速度为0
             dof_vel[:, [0, 2, 3, 4, 5, 6, 8, 9, 10, 11]] = torch.tensor(
                 frames[:, 10:20], dtype=torch.float
             ).cuda()
             self.dof_vel[env_ids, :] = dof_vel[:]
-        elif self.cfg.env.num_states == 16:  # exclude hip roll and yaw
+        elif self.cfg.env.num_states == 16:  # 16维: 排除髋翻滚和偏航(索引1,2,7,8)
+            # 列布局: [dof_pos(8, excluding 1,2,7,8) | dof_vel(8, excluding 1,2,7,8)]
             dof_pos = torch.zeros(
                 (len(env_ids), self.num_dof), dtype=torch.float, device=self.device
             )
             dof_pos[:, [1, 7]] = self.default_dof_pos[:, [1, 7]]
+            # 髋偏航关节添加随机扰动
             dof_pos[:, [2, 8]] = self.default_dof_pos[:, [2, 8]] + torch_rand_float(
                 -0.3, 0.3, (len(env_ids), 2), device=self.device
             )
@@ -588,6 +623,7 @@ class HhfcRobot(LeggedRobot):
                 frames[:, 0:8], dtype=torch.float
             ).cuda()
             self.dof_pos[env_ids, :] = dof_pos[:]
+
             dof_vel = torch.zeros(
                 (len(env_ids), self.num_dof), dtype=torch.float, device=self.device
             )
@@ -598,6 +634,7 @@ class HhfcRobot(LeggedRobot):
             ).cuda()
             self.dof_vel[env_ids, :] = dof_vel[:]
 
+        # 将关节状态应用到仿真器
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
@@ -607,16 +644,20 @@ class HhfcRobot(LeggedRobot):
         )
 
     def _reset_root_states_gail(self, env_ids, frames):
-        """Resets ROOT states position and velocities of selected environmments
-            Sets base position based on the curriculum
-            Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
+        """使用GAIL/AMP方法重置基座状态(从专家轨迹初始化)
+
+        从参考轨迹数据中提取基座角速度,忽略参考姿态(保持直立)。
+        基座线速度随机初始化,xy位置可在中心附近随机。
+
         Args:
-            env_ids (List[int]): Environemnt ids
+            env_ids (List[int]): 需要重置的环境ID列表
+            frames: 专家轨迹数据帧 [num_envs, num_states]
         """
-        # base position
+        # ========== 基座位置初始化 ==========
         if self.custom_origins:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
+            # xy位置在中心±1m范围内随机
             self.root_states[env_ids, :2] += torch_rand_float(
                 -1.0, 1.0, (len(env_ids), 2), device=self.device
             )  # xy position within 1m of the center
@@ -624,28 +665,37 @@ class HhfcRobot(LeggedRobot):
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
 
-        # ignore reference orientation
+        # ========== 基座姿态初始化 ==========
+        # 忽略参考轨迹中的姿态,初始化为直立(单位四元数)
         self.root_states[env_ids, 3:7] = torch.zeros(
             (len(env_ids), 4), dtype=torch.float, device=self.device
         )
-        self.root_states[env_ids, 6] = 1.0  # set w component of quaternion to 1.0
-        # base velocities
+        self.root_states[env_ids, 6] = 1.0  # 设置四元数w分量为1.0 (表示无旋转)
+
+        # ========== 基座线速度初始化 ==========
+        # 随机初始线速度 ±0.5 m/s
         self.root_states[env_ids, 7:10] = torch_rand_float(
             -0.5, 0.5, (len(env_ids), 3), device=self.device
-        )  # [7:10]: lin vel, [10:13]: ang vel
-        if self.cfg.env.num_states == 31:  # contains quaternion, base angular velocity
+        )  # [7:10]: 线速度 (x,y,z)
+
+        # ========== 基座角速度初始化 ==========
+        # 根据状态维度配置,从轨迹中提取或随机生成角速度
+        if self.cfg.env.num_states == 31:  # 31维: 包含四元数和基座角速度
+            # 从轨迹第4-7列提取角速度
             self.root_states[env_ids, 10:13] = torch.tensor(
                 frames[:, 4:7], dtype=torch.float
             ).cuda()
-        elif self.cfg.env.num_states == 27:  # contains base angular velocity
+        elif self.cfg.env.num_states == 27:  # 27维: 包含基座角速度
+            # 从轨迹第0-3列提取角速度
             self.root_states[env_ids, 10:13] = torch.tensor(
                 frames[:, 0:3], dtype=torch.float
             ).cuda()
-        else:  # only contains joint angles and velocities
+        else:  # 其他维度: 仅包含关节数据,角速度随机初始化
             self.root_states[env_ids, 10:13] = torch_rand_float(
                 -0.5, 0.5, (len(env_ids), 3), device=self.device
             )
 
+        # 将基座状态应用到仿真器
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -655,21 +705,38 @@ class HhfcRobot(LeggedRobot):
         )
 
     def reset_idx(self, env_ids):
+        """重置指定环境的所有状态
+
+        调用父类的reset_idx,然后进行额外的状态清理和重置。
+        包括修复重力投影bug、清除观测历史、重置控制延迟队列等。
+
+        Args:
+            env_ids: 需要重置的环境ID张量
+        """
+        # 调用父类的重置方法(会调用_reset_dofs和_reset_root_states)
         super().reset_idx(env_ids)
-        # fix reset gravity bug
+
+        # ========== 修复重置后的重力投影bug ==========
+        # 重新计算重力在body坐标系的投影
         self.base_quat[env_ids] = self.root_states[env_ids, 3:7]
         self.projected_gravity[env_ids] = quat_rotate_inverse(
             self.base_quat[env_ids], self.gravity_vec[env_ids]
         )
-        # clear obs and critic history for the envs that are reset
+
+        # ========== 清除被重置环境的观测历史 ==========
+        # 清零actor观测历史(frame_stack帧)
         for i in range(self.obs_history.maxlen):
             self.obs_history[i][env_ids] *= 0
+        # 清零critic观测历史(c_frame_stack帧)
         for i in range(self.critic_history.maxlen):
             self.critic_history[i][env_ids] *= 0
-        # randomize_ctrl_delay
+
+        # ========== 重置控制延迟队列(如果启用) ==========
         if self.cfg.domain_rand.randomize_ctrl_delay:
+            # 清空动作队列
             self.action_queue[env_ids] *= 0.0
             self.action_queue[env_ids] = 0.0
+            # 随机重新分配控制延迟步数
             self.action_delay[env_ids] = torch.randint(
                 self.cfg.domain_rand.ctrl_delay_step_range[0],
                 self.cfg.domain_rand.ctrl_delay_step_range[1] + 1,
@@ -679,6 +746,16 @@ class HhfcRobot(LeggedRobot):
             )
 
     def _post_physics_step_callback(self):
+        """物理步后的通用回调函数
+
+        每个仿真步后执行的常规操作,包括:
+        1. 定期重新采样速度命令
+        2. 计算朝向角度控制(如果启用)
+        3. 测量地形高度(如果启用)
+        4. 施加随机外力扰动(如果启用)
+        """
+        # ========== 定期重新采样速度命令 ==========
+        # 检查是否到达命令重新采样时间
         env_ids = (
             (
                 self.episode_length_buf
@@ -688,137 +765,206 @@ class HhfcRobot(LeggedRobot):
             .nonzero(as_tuple=False)
             .flatten()
         )
-        self._resample_commands(env_ids)
+        self._resample_commands(env_ids)  # 为这些环境重新采样命令
+
+        # ========== 朝向角度控制(如果启用) ==========
         if self.cfg.commands.heading_command:
+            # 计算当前朝向角度
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
+            # 将目标朝向转换为角速度命令 (比例控制)
             self.commands[:, 2] = torch.clip(
                 0.5 * wrap_to_pi(self.commands[:, 3] - heading), -1.0, 1.0
             )
-        # set small commands to zero
+
+        # ========== 过滤小命令(死区) ==========
+        # 将绝对值小于0.1的角速度命令置零(避免微小抖动)
         self.commands[:, 2] *= (torch.abs(self.commands[:, 2]) > 0.1).float()
 
+        # ========== 测量地形高度(如果启用) ==========
         if self.cfg.terrain.measure_heights:
             self.measured_heights = self._get_heights()
+
+        # ========== 施加随机外力扰动(如果启用) ==========
         if self.cfg.domain_rand.push_robots and (
             self.common_step_counter % self.cfg.domain_rand.push_interval == 0
         ):
-            self._push_robots()
+            self._push_robots()  # 每隔一定步数推动机器人
 
     def _push_robots(self):
-        """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
-        max_vel = self.cfg.domain_rand.max_push_vel_xy
+        """随机推动机器人
+
+        通过直接设置基座速度模拟外力冲击,用于测试策略的鲁棒性。
+        """
+        max_vel = self.cfg.domain_rand.max_push_vel_xy  # 最大推动速度
+        # 在xy平面生成随机速度 [-max_vel, max_vel]
         self.rand_push_force[:, :2] = torch_rand_float(
             -max_vel, max_vel, (self.num_envs, 2), device=self.device
         )
+        # 直接设置基座xy平面速度(模拟冲击效果)
         self.root_states[:, 7:9] = self.rand_push_force[
             :, :2
         ]  # set random base velocity in xy plane
+        # 应用到仿真器
         self.gym.set_actor_root_state_tensor(
             self.sim, gymtorch.unwrap_tensor(self.root_states)
         )
 
     def _refresh_rigid_body_states(self):
+        """刷新刚体状态(主要是脚部状态)
+
+        从仿真器获取的刚体状态中提取脚部的位置和速度,
+        用于计算脚部相关的奖励(如着地速度、离地高度等)。
+        """
         # Periodic Reward Framework
-        # refresh the states of the rigid bodies
+        # 提取脚部速度: rigid_body_states[:, feet_indices, 7:10] = 线速度(x,y,z)
         self.foot_vel = self.rigid_body_states[:, self.feet_indices, 7:10]
+        # 提取脚部位置: rigid_body_states[:, feet_indices, 0:3] = 位置(x,y,z)
         self.foot_pos = self.rigid_body_states[:, self.feet_indices, 0:3]
 
     def _get_noise_scale_vec(self, cfg):
-        """Sets a vector used to scale the noise added to the observations.
-            [NOTE]: Must be adapted when changing the observations structure
+        """构造观测噪声比例向量
+
+        为每个观测维度分配噪声比例,用于训练时的噪声注入。
+        通过在观测中添加噪声,提高策略对传感器误差的鲁棒性。
+        [注意]: 修改观测结构时必须相应调整此函数
 
         Args:
-            cfg (Dict): Environment config file
+            cfg (Dict): 环境配置对象,包含noise字段定义的噪声比例
 
         Returns:
-            [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
+            torch.Tensor: 形状为(num_single_obs,)的噪声比例向量,用于乘以[-1,1]均匀分布
+
+        Notes:
+            - num_single_obs = 45 (3命令 + 12关节位置 + 12关节速度 + 12上一动作 + 3角速度 + 3重力投影)
+            - 已移除clock和phase输入
+            - heights未使用(当前配置measure_heights=False),若启用需扩展num_single_obs
         """
         noise_vec = torch.zeros(
             self.cfg.env.num_single_obs, dtype=torch.float, device=self.device
-        )
-        self.add_noise = self.cfg.noise.add_noise
-        noise_scales = self.cfg.noise.noise_scales
-        noise_level = self.cfg.noise.noise_level
-        noise_vec[0:3] = 0.0  # commands
+        )  # 初始化噪声向量(45维)
+        self.add_noise = self.cfg.noise.add_noise  # 是否添加噪声的开关
+        noise_scales = self.cfg.noise.noise_scales  # 噪声比例配置
+        noise_level = self.cfg.noise.noise_level  # 噪声强度系数
+        # 为每个观测维度设置噪声比例:
+        noise_vec[0:3] = 0.0  # [0:3] 命令 (不添加噪声,保持控制精度)
+        # [3:15] 关节位置噪声
         noise_vec[3:15] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
+        # [15:27] 关节速度噪声
         noise_vec[15:27] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
-        noise_vec[27:39] = 0.0  # previous actions
+        noise_vec[27:39] = 0.0  # [27:39] 上一动作 (不添加噪声,保持控制连续性)
+        # [39:42] 角速度噪声
         noise_vec[39:42] = noise_scales.ang_vel * noise_level * self.obs_scales.ang_vel
+        # [42:45] 重力投影噪声
         noise_vec[42:45] = noise_scales.gravity * noise_level
         # removed clock & phase inputs; total length = 45
         # heights not used (measure_heights False in current config). If enabled, must extend num_single_obs accordingly.
         return noise_vec
 
     def _init_buffers(self):
-        """Initialize torch tensors which will contain simulation states and processed quantities"""
-        super()._init_buffers()
+        """初始化仿真状态和处理量的张量缓冲区
+
+        创建并初始化所有用于存储仿真状态、观测历史、动作队列等的PyTorch张量。
+        继承父类初始化后,额外添加脚部状态、观测历史、动作延迟等特定缓冲区。
+
+        Notes:
+            - rigid_body_states: 刚体状态张量 (num_envs, num_bodies, 13) - 位置(3)+姿态(4)+线速度(3)+角速度(3)
+            - obs_history: 观测历史队列,用于frame stacking (10帧 × 45维)
+            - critic_history: 特权观测历史队列 (3帧 × 81维)
+            - action_queue: 动作延迟队列 (最大延迟步数+1 × 12维动作)
+            - action_delay: 每个环境的实际延迟步数 (随机初始化)
+        """
+        super()._init_buffers()  # 调用父类初始化(创建基础缓冲区)
+        # ===== 获取刚体状态张量 (用于周期性奖励框架) =====
         rigid_body_state = self.gym.acquire_rigid_body_state_tensor(
             self.sim
         )  # Periodic Reward Framework
         self.gym.refresh_rigid_body_state_tensor(self.sim)  # Periodic Reward Framework
 
+        # 包装为PyTorch张量并reshape为(num_envs, num_bodies, 13)
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state).view(
             self.num_envs, -1, 13
         )  # Periodic Reward Framework
+        # 提取脚部状态: 速度[7:10]和位置[0:3]
         self.foot_vel = self.rigid_body_states[:, self.feet_indices, 7:10]
         self.foot_pos = self.rigid_body_states[:, self.feet_indices, 0:3]
 
-        # obs_history
-        self.obs_history = deque(maxlen=self.cfg.env.frame_stack)
-        self.critic_history = deque(maxlen=self.cfg.env.c_frame_stack)
+        # ===== 初始化观测历史队列 (用于frame stacking) =====
+        self.obs_history = deque(
+            maxlen=self.cfg.env.frame_stack
+        )  # actor的历史队列(10帧)
+        self.critic_history = deque(
+            maxlen=self.cfg.env.c_frame_stack
+        )  # critic的历史队列(3帧)
+        # 预填充actor历史队列(全零初始化)
         for _ in range(self.cfg.env.frame_stack):
             self.obs_history.append(
                 torch.zeros(
                     self.num_envs,
-                    self.cfg.env.num_single_obs,
+                    self.cfg.env.num_single_obs,  # 单帧观测维度=45
                     dtype=torch.float,
                     device=self.device,
                 )
             )
+        # 预填充critic历史队列(全零初始化)
         for _ in range(self.cfg.env.c_frame_stack):
             self.critic_history.append(
                 torch.zeros(
                     self.num_envs,
-                    self.cfg.env.single_num_privileged_obs,
+                    self.cfg.env.single_num_privileged_obs,  # 单帧特权观测维度=81
                     dtype=torch.float,
                     device=self.device,
                 )
             )
 
+        # ===== 初始化控制延迟相关缓冲区 (如果启用) =====
         if self.cfg.domain_rand.randomize_ctrl_delay:
+            # 动作队列: 存储历史动作以模拟延迟
             self.action_queue = torch.zeros(
                 self.num_envs,
-                self.cfg.domain_rand.ctrl_delay_step_range[1] + 1,
-                self.num_actions,
+                self.cfg.domain_rand.ctrl_delay_step_range[1] + 1,  # 最大延迟+1
+                self.num_actions,  # 动作维度=12
                 dtype=torch.float,
                 device=self.device,
                 requires_grad=False,
             )
+            # 每个环境的随机延迟步数 [min, max]
             self.action_delay = torch.randint(
-                self.cfg.domain_rand.ctrl_delay_step_range[0],
-                self.cfg.domain_rand.ctrl_delay_step_range[1] + 1,
+                self.cfg.domain_rand.ctrl_delay_step_range[0],  # 最小延迟
+                self.cfg.domain_rand.ctrl_delay_step_range[1] + 1,  # 最大延迟+1
                 (self.num_envs,),
                 device=self.device,
                 requires_grad=False,
             )
 
     def _create_envs(self):
-        super()._create_envs()
+        """创建并配置仿真环境
+
+        调用父类创建基础环境后,额外查找并存储特定刚体索引(脚部、膝盖)。
+        这些索引用于后续的状态提取和奖励计算。
+
+        Notes:
+            - 继承LeggedRobot._create_envs()完成环境、地形、actor的创建
+            - 区分左右脚索引 (foot_index_left, foot_index_right)
+            - 查找膝盖刚体索引 (knee_indices) 用于碰撞检测和奖励计算
+        """
+        super()._create_envs()  # 调用父类创建环境、地形、加载URDF等
         # knee_dof_indices: [3,9]
-        # Periodic Reward Framework. distinguish between 4 feet
+        # ===== 周期性奖励框架: 区分左右脚 =====
         for i in range(len(self.feet_names)):
-            if "Lleg" in self.feet_names[i]:
+            if "Lleg" in self.feet_names[i]:  # 左脚包含"Lleg"标识
                 self.foot_index_left = self.feet_indices[i]
-            elif "Rleg" in self.feet_names[i]:
+            elif "Rleg" in self.feet_names[i]:  # 右脚包含"Rleg"标识
                 self.foot_index_right = self.feet_indices[i]
 
+        # ===== 查找膝盖刚体索引 (用于碰撞检测) =====
         self.knee_indices = torch.zeros(
             len(self.knee_names),
             dtype=torch.long,
             device=self.device,
             requires_grad=False,
         )
+        # 遍历膝盖名称,从第一个环境的第一个actor中查找刚体句柄
         for i in range(len(self.knee_names)):
             self.knee_indices[i] = self.gym.find_actor_rigid_body_handle(
                 self.envs[0], self.actor_handles[0], self.knee_names[i]
